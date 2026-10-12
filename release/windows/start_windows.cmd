@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 if exist "runtime\python\python.exe" (
-  "runtime\python\python.exe" -X utf8 -B run.py serve %*
+  "runtime\python\python.exe" -X utf8 -B launch.py serve %*
   if errorlevel 1 pause
   exit /b
 )
@@ -11,5 +11,5 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-".venv\Scripts\python.exe" -B run.py serve %*
+".venv\Scripts\python.exe" -B launch.py serve %*
 if errorlevel 1 pause

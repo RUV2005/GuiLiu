@@ -8,6 +8,7 @@ from filelock import Timeout
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Literal
 import json
+import logging
 import sqlite3
 import os
 import requests
@@ -25,10 +26,11 @@ from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from adr_scheduler import ADRScheduler, ensure_status_table, recent_status, recent_bills, get_adr_context, save_items
 from runtime_settings import database_path, get_setting, settings_document, update_settings
-from loop import LoopScheduler, FullMailImport
+from loop import LoopScheduler, FullMailImport, settle_first_mail_import, start_first_mail_import
+from updates import UpdateError, Updater
 from fastapi import Depends, HTTPException, Request
 from initialization import (Initialization, StepRequest, SetupError, bootstrap_database,
-                            runtime_allowed, bank_sources)
+                            runtime_allowed, bank_sources, MailSetupInput, BankInput)
 from system_control import ShutdownController, ShutdownRequest, require_local_control, exit_service
 from oauth_callback_page import callback_language, callback_page
 from service_auth import ServiceAuthMiddleware, agent_requests
@@ -48,6 +50,7 @@ async def lifespan(app):
         AGENT_BASE_URL,
     )
     app.state.stopping = False
+    app.state.updater = Updater()
     initialization = Initialization(DB_FILE, AGENT_BASE_URL)
     app.state.initialization = initialization
     def finish():
@@ -58,6 +61,8 @@ async def lifespan(app):
             scheduler.start()
 
     initialization.on_complete = finish
+    # A mailbox added from Settings imports its history once its banks are confirmed.
+    initialization.on_mailbox_ready = lambda: start_first_mail_import(initialization, full_mail_import, bank_sources())
     try:
         if runtime_allowed():
             finish()
@@ -65,6 +70,11 @@ async def lifespan(app):
     finally:
         initialization.stop()
         full_mail_import.stop()
+        try:
+            # An automatic first import that finished while the app was open is not repeated on the next visit.
+            settle_first_mail_import(initialization, full_mail_import.status())
+        except Exception:
+            log.exception("Could not record the first full mail import")
         mail_loop.stop()
         scheduler.stop()
         fx_rates.history_updater.stop()
@@ -78,6 +88,7 @@ app.add_middleware(ServiceAuthMiddleware, service="backend")
 def health():
     return {"success": True, "result": {"status": "online"}}
 
+log = logging.getLogger("uvicorn.error.backend")
 DB_FILE = database_path()
 AGENT_BASE_URL = get_setting("services.agent_url", "http://127.0.0.1:8000", "ABK_AGENT_BASE_URL").rstrip("/")
 app.include_router(create_assets_router(lambda: DB_FILE))
@@ -128,7 +139,79 @@ def setup_callback(request: Request, code: str | None = Query(default=None, max_
     return callback_page(language, "connected")
 
 
+@setup_router.get("/mailboxes")
+def setup_mailboxes(setup=Depends(local_initialization)):
+    return setup_response(setup.mailbox_overview)
+
+
+@setup_router.post("/mailboxes/connect")
+def connect_setup_mailbox(request: MailSetupInput, setup=Depends(local_initialization)):
+    """Settings: connect another mailbox (it is then indexed and searched for banks in the background) or renew
+    the credentials of a connected one. Gmail through Google answers with an authorization URL."""
+    return setup_response(lambda: setup.connect_mailbox(request))
+
+
+@setup_router.post("/mailboxes/confirm")
+def confirm_setup_mailbox(request: BankInput, setup=Depends(local_initialization)):
+    """Settings: bind or skip the bank sources a new mailbox brought; its rules are then built in the background."""
+    return setup_response(lambda: setup.confirm_mailbox_sources(request.confirmations))
+
+
+@setup_router.post("/mailboxes/retry")
+def retry_setup_mailbox(setup=Depends(local_initialization)):
+    return setup_response(setup.retry_mailbox_job)
+
+
+@setup_router.post("/mailboxes/cancel")
+def cancel_setup_mailbox(setup=Depends(local_initialization)):
+    return setup_response(setup.cancel_mailbox_job)
+
+
+@setup_router.post("/mailboxes/dismiss")
+def dismiss_setup_mailbox(setup=Depends(local_initialization)):
+    return setup_response(setup.dismiss_mailbox_job)
+
+
 app.include_router(setup_router)
+
+
+class UpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: str = Field(min_length=5, max_length=64)
+
+
+def update_response(callback):
+    try:
+        return {"success": True, "result": callback(), "error": None, "status_code": 200}
+    except UpdateError as error:
+        code = 409 if str(error) in {"busy", "stale", "full_package", "unsupported"} else 400
+        return JSONResponse(status_code=code, content={"success": False, "result": None, "error": str(error), "status_code": code})
+
+
+@app.get("/system/update", tags=["System"], dependencies=[Depends(local_initialization)])
+def update_status(request: Request, refresh: bool = False):
+    """The running version and, from the signed latest.json, whether a newer one can be installed."""
+    result = update_response(lambda: request.app.state.updater.status(refresh))
+    return result if isinstance(result, JSONResponse) else JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/system/update", tags=["System"], dependencies=[Depends(local_initialization)], status_code=202)
+def start_update(payload: UpdateRequest, request: Request):
+    """Download and verify the offered version, then restart into it; launch.py backs up data and can roll back."""
+    return update_response(lambda: request.app.state.updater.start(payload.version))
+
+
+@app.post("/system/update/restart", tags=["System"], dependencies=[Depends(local_initialization)], status_code=202)
+def restart_for_update(request: Request):
+    """Apply an update that is already prepared (downloaded earlier but not yet switched to)."""
+    updater = request.app.state.updater
+
+    def restart():
+        if not updater.status().get("pending"):
+            raise UpdateError("stale")
+        updater.restart()
+        return updater.status()
+    return update_response(restart)
 
 
 @app.get("/user/profile", tags=["User profile"])
@@ -219,7 +302,31 @@ def start_full_mail_import(payload: FullMailImportRequest, request: Request):
 
 @app.get("/mail-imports/full", tags=["Mail import"], dependencies=[Depends(local_initialization)])
 def full_mail_import_status(request: Request):
-    return {"success": True, "result": request.app.state.full_mail_import.status(),
+    task = request.app.state.full_mail_import.status()
+    settle_first_mail_import(request.app.state.initialization, task)
+    return {"success": True, "result": task, "error": None, "status_code": 200}
+
+
+@app.post("/mail-imports/full/first", tags=["Mail import"], dependencies=[Depends(local_initialization)])
+def start_first_full_mail_import(request: Request):
+    """Called by the workspace on every load. The first visit after setup imports the whole mailbox (bank and image
+    mail) without a click; a run cut short by closing the app resumes; once finished this does nothing."""
+    state = request.app.state.initialization.state()
+    record = state.get("first_mail_import")
+    if not runtime_allowed() or state.get("active_step") or state.get("vector_sync", {}).get("status") == "running":
+        # Like a manual start, it waits for setup's background indexing; the workspace asks again later.
+        waiting = runtime_allowed() and bool(record) and record.get("status") != "done"
+        return {"success": True, "result": {"started": False, "waiting": waiting, "first_import": record},
+                "error": None, "status_code": 200}
+    try:
+        started, record = start_first_mail_import(request.app.state.initialization, request.app.state.full_mail_import,
+                                                  bank_sources())
+    except (ValueError, OSError, RuntimeError):
+        log.exception("Could not start the first full mail import")
+        return JSONResponse({"success": False, "result": None, "error": "Could not start full mail import",
+                             "status_code": 503}, status_code=503)
+    return {"success": True, "result": {"started": started, "first_import": record,
+                                        "task": request.app.state.full_mail_import.status()},
             "error": None, "status_code": 200}
 
 
@@ -320,9 +427,14 @@ def create_import_router(db_path, agent_url):
         return respond(lambda: service().edit_rows(import_id, request.revision, [row.model_dump() for row in request.rows]))
 
     @router.post("/{import_id}/commit")
-    def commit(import_id: str, request: CommitRequest,
+    def commit(import_id: str, request: CommitRequest, background: BackgroundTasks,
                idempotency_key: str = Header(min_length=1, max_length=200)):
-        return respond(lambda: service().commit(import_id, request.revision, [row.model_dump() for row in request.rows], idempotency_key))
+        current = service()
+        response = respond(lambda: current.commit(import_id, request.revision, [row.model_dump() for row in request.rows], idempotency_key))
+        if response.status_code == 200:
+            # Classification memory learns after the response; the ledger write does not wait for embeddings.
+            background.add_task(current.teach_memory, import_id)
+        return response
 
     return router
 

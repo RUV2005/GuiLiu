@@ -74,6 +74,26 @@ export function mailQueryError(query, providers = ['gmail']) {
   return '';
 }
 const clean = value => String(value ?? '').trim();
+// Mail date range of the vector step, in months back from today; 0 is all mail and the default (last) stop.
+export const MAIL_RANGES = [3, 6, 12, 24, 36, 0];
+export const ALL_MAIL_RANGE = MAIL_RANGES.length - 1;
+export function rangeStart(index, now = new Date()) {
+  const months = MAIL_RANGES[index] ?? 0;
+  if (!months) return null;
+  const year = now.getFullYear(), month = now.getMonth() - months;
+  return new Date(year, month, Math.min(now.getDate(), new Date(year, month + 1, 0).getDate()));
+}
+const two = n => String(n).padStart(2, '0');
+export function rangeQuery(index, now = new Date()) {
+  const start = rangeStart(index, now);
+  return start ? `after:${start.getFullYear()}/${two(start.getMonth() + 1)}/${two(start.getDate())}` : '';
+}
+// What a saved filter means, for the locked view: all mail, mail from a date on, or a custom search.
+export function describeQuery(query) {
+  const text = clean(query);
+  const match = /^after:(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(text);
+  return !text ? { kind: 'all' } : match ? { kind: 'after', date: new Date(+match[1], match[2] - 1, +match[3]) } : { kind: 'custom', query: text };
+}
 export function stepPayload(step, fields, sources = [], accounts = [], now = Date.now()) {
   if (step === 'api_keys') {
     // A blank key is tested from what the Backend already saved; both blank re-tests the saved pair.
@@ -113,7 +133,9 @@ export function stepPayload(step, fields, sources = [], accounts = [], now = Dat
   }
   if (step === 'ocr_source') return { email: receiptEmail(fields.email) };
   if (step === 'vector_db') {
-    const query = clean(fields.query);
+    // A started import keeps its first filter; otherwise a custom search takes the place of the date range.
+    const query = typeof fields.locked_query === 'string' ? fields.locked_query
+      : clean(fields.query) || rangeQuery(Number(fields.mail_range ?? ALL_MAIL_RANGE), new Date(now));
     if (query.length > 2000) throw new Error('queryLong');
     const invalid = mailQueryError(query, fields.mail_providers);
     if (invalid) throw new Error(invalid);

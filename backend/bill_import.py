@@ -10,8 +10,10 @@ import io
 import json
 import os
 from pathlib import Path
+import random
 import re
 import sqlite3
+import time
 from typing import Literal
 import unicodedata
 from uuid import uuid4
@@ -25,6 +27,7 @@ import requests
 from service_auth import agent_requests
 
 import assets
+from categorization import category
 from database import DBmanage
 from runtime_settings import server_data_path
 
@@ -55,9 +58,22 @@ def atomic_json(path, data):
             json.dump(data, stream, ensure_ascii=False, indent=2, allow_nan=False)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        replace_file(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def replace_file(source, target, attempts=40):
+    """os.replace that waits out readers: on Windows a file another thread has open (a status poll reading job.json)
+    cannot be replaced until it is closed."""
+    for attempt in range(attempts):
+        try:
+            return os.replace(source, target)
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            # Jitter keeps the retries from falling into step with a polling reader.
+            time.sleep(0.002 + random.random() * 0.01 * (1 + attempt // 10))
 
 
 class ReplaceRule(BaseModel):
@@ -464,6 +480,9 @@ def find_duplicate_income(conn, row, window_minutes=1):
 # Import jobs and commits
 
 class ImportService:
+    SAVE_EVERY = 100          # commit: rows per ledger transaction and job-file save
+    CLASSIFY_CHUNK = 200      # analysis: merchant/product pairs per Agent classify-batch request
+
     def __init__(self, db_path, agent_url, root=None, agent_client=None):
         self.db_path = str(Path(db_path).resolve())
         self.agent_url = agent_url.rstrip("/")
@@ -607,86 +626,153 @@ class ImportService:
             self.save(job)
 
     def analyze(self, job):
-        cache = {}
-        seen = {}
-        agent_calls = 0
-        max_agent_calls = max(0, min(500, int(os.getenv("ABK_IMPORT_MAX_AGENT_CALLS", "50"))))
+        """Check, deduplicate and classify parsed rows in three phases.
+
+        1. One ledger pass: currency, duplicates, same-file identity, the income rule, and merchants the ShopName
+           table already knows.
+        2. Every other merchant/product pair goes to the Agent's classify-batch in chunks, outside the ledger
+           connection. The Agent answers from classification memory first and asks the model only for what memory
+           does not know, merging an ordinary merchant's products into one question. Progress is saved per chunk.
+        3. Apply the categories and re-check duplicates with the final merchant names.
+        Every row is classified; nothing is cut off by a request budget. A row that fails is kept for review with its
+        error and the rest continue. Answers already received survive an explicit re-parse in classification_cache."""
+        manual = {"main_category": "", "sub_category": "", "source": "manual"}
+        cache = {key: value for key, value in (job.get("classification_cache") or {}).items()
+                 if value.get("main_category") and value.get("sub_category") and not value.get("error")}
+        job["classification_cache"] = cache
+        seen, known, targets = {}, {}, []
         with self.connect() as conn:
             account_currency = assets.currency(assets.get_account(conn, job["account_number"])["CurrencyType"])
             # ShopName can be empty when the existing classifier stores only vector memory.
-            options = [{"main_category": row[0], "sub_category": row[1]} for row in conn.execute("""
-                SELECT DISTINCT trim(MainCategory), trim(SubCategory) FROM (
-                    SELECT MainCategory, SubCategory FROM ShopName
-                    UNION SELECT MainCategory, SubCategory FROM DealingData
-                    UNION SELECT MainCategory, SubCategory FROM ADRresults
-                ) WHERE trim(COALESCE(MainCategory, '')) NOT IN ('', '未分类')
-                    AND trim(COALESCE(SubCategory, '')) NOT IN ('', '未分类')
-                ORDER BY 1, 2 LIMIT 500""")]
+            options = DBmanage(self.db_path).R_for_category_options(conn)[:500]
             for row in job["rows"]:
-                if row["status"] != "new":
-                    continue
-                n = row["normalized"]
-                if assets.currency(n["CurrencyTypeNumber"]) != account_currency:
-                    row.update(status="needs_review", issues=row["issues"] + ["account_currency_mismatch"])
-                    continue
-                row["status"], row["duplicate_candidates"] = find_duplicate_transaction(conn, row)
-                if row["operation_id"] in seen:
-                    earlier = seen[row["operation_id"]]
-                    if all(n.get(field) == earlier["normalized"].get(field) for field in
-                           ("price", "CurrencyTypeNumber", "isotime", "AccountNumber", "raw_shop_name", "product_name", "transaction_kind")):
-                        row.update(status="duplicate", duplicate_candidates=[{"row_id": earlier["row_id"], "reasons": ["same_file_identity"]}])
+                try:
+                    key = self._check_row(conn, row, seen, account_currency)
+                    if key is None:
+                        continue
+                    targets.append((row, key))
+                    if key in known:
+                        continue
+                    # The mail pipeline's lookup, read-only: an import preview never records unknown merchants.
+                    shop, main, sub = category(row["normalized"]["CurrencyTypeNumber"]).Data_classification(
+                        key[0], connection=conn, record_unknown=False)
+                    if shop and main and sub and not {main, sub} & {"未分类", "待分类"}:
+                        known[key] = {"shop_name": shop, "main_category": main, "sub_category": sub,
+                                      "detail_category": "", "source": "shop_name_table"}
                     else:
-                        row.update(status="needs_review", issues=row["issues"] + ["conflicting_rows_with_same_identity"])
-                seen[row["operation_id"]] = row
-                if row["status"] not in {"new", "suspected_duplicate"}:
-                    continue
-                if n.get("transaction_kind") == "income":
-                    n.update(main_category="收入", sub_category=n.get("transaction_type") or "其他收入")
-                    row["classification_source"] = "income_rule"
-                    continue
-                key = (n["raw_shop_name"], n["product_name"])
-                classification = cache.get(key)
-                if classification is None:
-                    exact = conn.execute("SELECT ShopName,MainCategory,SubCategory FROM ShopName WHERE key=?", (n["raw_shop_name"],)).fetchone()
-                    if exact and exact[1] and exact[2] and "未分类" not in (exact[1], exact[2]):
-                        classification = {"shop_name": exact[0], "main_category": exact[1], "sub_category": exact[2],
-                                          "detail_category": "", "source": "shop_name_table"}
-                    elif job["use_agent"] and agent_calls < max_agent_calls:
-                        try:
-                            agent_calls += 1
-                            classification = self.call_agent("/agent/import/classify", {"shop_name": n["raw_shop_name"],
-                                "product_name": n["product_name"], "category_options": options})
-                        except Exception as error:
-                            classification = {"main_category": "", "sub_category": "", "source": "unavailable",
-                                              "error": str(error)[:200]}
-                    else:
-                        classification = {"main_category": "", "sub_category": "", "source": "manual"}
-                    cache[key] = classification
-                for field in ("shop_name", "main_category", "sub_category", "detail_category"):
-                    if classification.get(field):
-                        n[field] = classification[field]
-                row["classification_source"] = classification.get("source")
-                if not n["main_category"] or not n["sub_category"]:
-                    row["issues"].append("classification_required")
-                if classification.get("error"):
-                    row["issues"].append(classification["error"])
-                if row["status"] == "new":
-                    row["status"], row["duplicate_candidates"] = find_duplicate_transaction(conn, row)
-        job["agent_classification_calls"] = agent_calls
-        if job["use_agent"] and agent_calls >= max_agent_calls:
-            job["warnings"].append("Agent classification call limit reached; review remaining unclassified rows")
+                        known[key] = cache.get(self._cache_key(key))
+                except Exception as error:
+                    self._row_failed(row, error)
+        pending = [key for key, value in known.items() if value is None]
+        job["progress"] = {"stage": "classifying", "done": len(known) - len(pending), "total": len(known)}
+        used = 0
+        for start in range(0, len(pending), self.CLASSIFY_CHUNK):
+            chunk = pending[start:start + self.CLASSIFY_CHUNK]
+            asked = [key for key in chunk if key[0]]
+            if job["use_agent"] and asked:
+                try:
+                    answer = self.call_agent("/agent/import/classify-batch", {
+                        "items": [{"key": str(index), "shop_name": key[0], "product_name": key[1] or ""}
+                                  for index, key in enumerate(asked)],
+                        "category_options": options, "max_model_calls": 100})
+                    used += int(answer.get("model_calls") or 0)
+                    by_key = {str(result.get("key")): result for result in answer.get("results") or []}
+                    for index, key in enumerate(asked):
+                        known[key] = by_key.get(str(index)) or manual
+                        if known[key].get("main_category") and known[key].get("sub_category") and not known[key].get("error"):
+                            cache[self._cache_key(key)] = known[key]
+                except Exception as error:
+                    for key in asked:
+                        known[key] = {"main_category": "", "sub_category": "", "source": "unavailable", "error": str(error)[:200]}
+            for key in chunk:
+                known[key] = known[key] or manual
+            job["progress"]["done"] += len(chunk)
+            self.save(job)
+        with self.connect() as conn:
+            for row, key in targets:
+                try:
+                    n, classification = row["normalized"], known[key]
+                    for field in ("shop_name", "main_category", "sub_category", "detail_category"):
+                        if classification.get(field):
+                            n[field] = classification[field]
+                    row["classification_source"] = classification.get("source")
+                    if not n["main_category"] or not n["sub_category"]:
+                        row["issues"].append("classification_required")
+                    if classification.get("error"):
+                        row["issues"].append(classification["error"])
+                    if row["status"] == "new":
+                        row["status"], row["duplicate_candidates"] = find_duplicate_transaction(conn, row)
+                except Exception as error:
+                    self._row_failed(row, error)
+        job["agent_classification_calls"] = used
+        job.pop("progress", None)
+
+    @staticmethod
+    def _check_row(conn, row, seen, account_currency):
+        """Currency, duplicate, same-file identity and income checks for one parsed row. Returns the merchant/product
+        key when the row still needs a category, otherwise None."""
+        if row["status"] != "new":
+            return None
+        n = row["normalized"]
+        if assets.currency(n["CurrencyTypeNumber"]) != account_currency:
+            row.update(status="needs_review", issues=row["issues"] + ["account_currency_mismatch"])
+            return None
+        row["status"], row["duplicate_candidates"] = find_duplicate_transaction(conn, row)
+        if row["operation_id"] in seen:
+            earlier = seen[row["operation_id"]]
+            if all(n.get(field) == earlier["normalized"].get(field) for field in
+                   ("price", "CurrencyTypeNumber", "isotime", "AccountNumber", "raw_shop_name", "product_name", "transaction_kind")):
+                row.update(status="duplicate", duplicate_candidates=[{"row_id": earlier["row_id"], "reasons": ["same_file_identity"]}])
+            else:
+                row.update(status="needs_review", issues=row["issues"] + ["conflicting_rows_with_same_identity"])
+        seen[row["operation_id"]] = row
+        if row["status"] not in {"new", "suspected_duplicate"}:
+            return None
+        if n.get("transaction_kind") == "income":
+            n.update(main_category="收入", sub_category=n.get("transaction_type") or "其他收入")
+            row["classification_source"] = "income_rule"
+            return None
+        return n["raw_shop_name"], n["product_name"]
+
+    @staticmethod
+    def _row_failed(row, error):
+        row.update(status="needs_review", processing_error=str(error)[:500])
+        row["issues"].append("row_processing_failed")
+
+    @staticmethod
+    def _cache_key(key):
+        return json.dumps(list(key), ensure_ascii=False)
+
+    @staticmethod
+    def _open_expense(row):
+        """An expense still to import, as (is it one, does it still lack a category)."""
+        n = row["normalized"]
+        expense = (row["status"] in {"new", "suspected_duplicate"} and n.get("transaction_kind") != "income"
+                   and row.get("commit_status") != "imported")
+        return expense, expense and not (n.get("main_category") and n.get("sub_category"))
 
     def summary(self, job):
         rows = job["rows"]
-        return {**{k: v for k, v in job.items() if k not in {"rows", "source_path", "commits"}},
-                "counts": dict(Counter(row.get("commit_status") or row["status"] for row in rows)), "total": len(rows)}
+        # Where the categories of expenses still to import came from: memory (or the ShopName table), the model, the
+        # user, or nowhere yet. Shown above the preview, so a large file says how much is left to classify by hand.
+        flags = [self._open_expense(row) for row in rows]
+        sources = Counter(row.get("classification_source") for row, (expense, unclassified) in zip(rows, flags)
+                          if expense and not unclassified)
+        return {**{k: v for k, v in job.items() if k not in {"rows", "source_path", "commits", "classification_cache"}},
+                "counts": dict(Counter(row.get("commit_status") or row["status"] for row in rows)), "total": len(rows),
+                "classification": {"memory": sources["classification_memory"] + sources["shop_name_table"],
+                                   "model": sources["llm"], "user": sources["user_confirmed"],
+                                   "open": sum(unclassified for _, unclassified in flags)}}
 
     def get(self, ident):
         return self.summary(self.load(ident))
 
     def rows(self, ident, status=None, offset=0, limit=50):
         rows = self.load(ident)["rows"]
-        if status:
+        if status == "unclassified":
+            # Not a row status: expenses still lacking a category, the preview's "to classify" filter.
+            rows = [row for row in rows if self._open_expense(row)[1]]
+        elif status:
             rows = [row for row in rows if (row.get("commit_status") or row["status"]) == status]
         return {"rows": rows[offset:offset + limit], "total": len(rows), "offset": offset,
                 "next_offset": offset + limit if offset + limit < len(rows) else None}
@@ -758,56 +844,109 @@ class ImportService:
             job["commits"][key] = {"hash": digest, "state": "running"}
             job["state"] = "importing"
             self.save(job)
-            for choice in choices:
-                row = indexed[choice["row_id"]]
-                if row.get("commit_status") in {"imported", "skipped"}:
-                    continue
-                if choice["action"] == "skip":
-                    row["commit_status"] = "skipped"
-                    self.save(job)
-                    continue
+            # Rows are written SAVE_EVERY at a time: one ledger transaction (one disk sync) per group, a savepoint per row
+            # so a failing row is rolled back alone, and row states recorded only after the group commits, so the job
+            # never claims a row the ledger does not have. run_operation is idempotent per row, so a retry after a
+            # crash re-runs a group safely.
+            pending = [(indexed[choice["row_id"]], choice) for choice in choices
+                       if indexed[choice["row_id"]].get("commit_status") not in {"imported", "skipped"}]
+            for start in range(0, len(pending), self.SAVE_EVERY):
+                group, staged = pending[start:start + self.SAVE_EVERY], []
                 try:
                     with self.connect() as conn:
                         conn.execute("BEGIN IMMEDIATE")
-                        state, candidates = find_duplicate_transaction(conn, row)
-                        known = {(c.get("DealingNumber"), c.get("income_id")) for c in row["duplicate_candidates"]}
-                        current = {(c.get("DealingNumber"), c.get("income_id")) for c in candidates}
-                        if state == "duplicate":
-                            row.update(commit_status="skipped", duplicate_candidates=candidates)
-                        elif state == "needs_review" or (state == "suspected_duplicate" and (not choice.get("confirm_distinct") or not current <= known)):
-                            row.update(commit_status="needs_review", duplicate_candidates=candidates, status=state)
-                        else:
-                            n = row["normalized"]
-                            account = assets.get_account(conn, n["AccountNumber"])
-                            if assets.currency(account["CurrencyType"]) != assets.currency(n["CurrencyTypeNumber"]):
-                                raise ImportProblem("Account currency changed since preview", 409)
-                            if n.get("transaction_kind") == "income":
-                                payload = {"account_number": n["AccountNumber"], "source_name": n["shop_name"],
-                                    "amount": n["price"], "currency": assets.currency(n["CurrencyTypeNumber"]),
-                                    "effective_at": n["isotime"], "note": n["product_name"],
-                                    "provider": n["provider"], "transaction_id": n["transaction_id"],
-                                    "merchant_order_id": n["merchant_order_id"], "payment_method": n["payment_method"],
-                                    "main_category": n["main_category"], "sub_category": n["sub_category"],
-                                    "detail_category": n["detail_category"], "filename": job["filename"],
-                                    "import_id": ident, "row_number": row["row_number"],
-                                    "external_income_confirmed": bool(choice.get("confirm_external_income"))}
-                                result = assets.run_operation(conn, row["operation_id"], "income.create", payload,
-                                    lambda operation_id: assets.record_income(conn, payload, operation_id))
-                                row.update(commit_status="imported", income_id=result["income_id"],
-                                    balance_sync={"status": "linked", "change_id": result["change_id"]})
-                            else:
-                                payload = DBmanage.dealing_payload(n["shop_name"], n["price"], n["CurrencyTypeNumber"], n["isotime"],
-                                    n["main_category"], n["sub_category"], n["AccountNumber"], n.get("detail_category", ""), None, None)
-                                result = assets.run_operation(conn, row["operation_id"], "dealing.create", payload,
-                                    lambda operation_id: DBmanage.insert_dealing(conn, payload, operation_id))
-                                row.update(commit_status="imported", DealingNumber=result["DealingNumber"], balance_sync=result["balance_sync"])
-                    row.pop("commit_error", None)
+                        for row, choice in group:
+                            if choice["action"] == "skip":
+                                staged.append((row, {"commit_status": "skipped"}))
+                                continue
+                            conn.execute("SAVEPOINT import_row")
+                            try:
+                                staged.append((row, self._write_row(conn, job, ident, row, choice)))
+                                conn.execute("RELEASE import_row")
+                            except Exception as error:
+                                conn.execute("ROLLBACK TO import_row")
+                                conn.execute("RELEASE import_row")
+                                staged.append((row, {"commit_status": "failed", "commit_error": str(error)[:500]}))
                 except Exception as error:
-                    row.update(commit_status="failed", commit_error=str(error)[:500])
+                    # The group's transaction did not commit, so none of its rows reached the ledger.
+                    staged = [(row, {"commit_status": "failed", "commit_error": str(error)[:500]}) for row, _ in group]
+                for row, updates in staged:
+                    row.update(updates)
+                    if updates["commit_status"] != "failed":
+                        row.pop("commit_error", None)
                 self.save(job)
             job["commits"][key]["state"] = "completed"
+            # Expenses written with a model or user category teach classification memory afterwards (teach_memory);
+            # ones answered by memory or the ShopName table are already known.
+            for row in job["rows"]:
+                if (row.get("commit_status") == "imported" and "memory" not in row
+                        and row.get("classification_source") in {"llm", "user_confirmed"}
+                        and row["normalized"].get("transaction_kind") != "income"):
+                    row["memory"] = "pending"
             remaining = [row for row in job["rows"] if row["status"] in {"new", "suspected_duplicate"} and row.get("commit_status") not in {"imported", "skipped"}]
             job["state"] = "partial_failed" if remaining or any(row.get("commit_status") in {"failed", "needs_review"} for row in job["rows"]) else "completed"
             job["revision"] += 1
             self.save(job)
             return self.summary(job)
+
+    def _write_row(self, conn, job, ident, row, choice):
+        """Write one previewed row inside the caller's transaction and return the row's new fields."""
+        state, candidates = find_duplicate_transaction(conn, row)
+        known = {(c.get("DealingNumber"), c.get("income_id")) for c in row["duplicate_candidates"]}
+        current = {(c.get("DealingNumber"), c.get("income_id")) for c in candidates}
+        if state == "duplicate":
+            return {"commit_status": "skipped", "duplicate_candidates": candidates}
+        if state == "needs_review" or (state == "suspected_duplicate" and (not choice.get("confirm_distinct") or not current <= known)):
+            return {"commit_status": "needs_review", "duplicate_candidates": candidates, "status": state}
+        n = row["normalized"]
+        account = assets.get_account(conn, n["AccountNumber"])
+        if assets.currency(account["CurrencyType"]) != assets.currency(n["CurrencyTypeNumber"]):
+            raise ImportProblem("Account currency changed since preview", 409)
+        if n.get("transaction_kind") == "income":
+            payload = {"account_number": n["AccountNumber"], "source_name": n["shop_name"],
+                "amount": n["price"], "currency": assets.currency(n["CurrencyTypeNumber"]),
+                "effective_at": n["isotime"], "note": n["product_name"],
+                "provider": n["provider"], "transaction_id": n["transaction_id"],
+                "merchant_order_id": n["merchant_order_id"], "payment_method": n["payment_method"],
+                "main_category": n["main_category"], "sub_category": n["sub_category"],
+                "detail_category": n["detail_category"], "filename": job["filename"],
+                "import_id": ident, "row_number": row["row_number"],
+                "external_income_confirmed": bool(choice.get("confirm_external_income"))}
+            result = assets.run_operation(conn, row["operation_id"], "income.create", payload,
+                lambda operation_id: assets.record_income(conn, payload, operation_id))
+            return {"commit_status": "imported", "income_id": result["income_id"],
+                    "balance_sync": {"status": "linked", "change_id": result["change_id"]}}
+        payload = DBmanage.dealing_payload(n["shop_name"], n["price"], n["CurrencyTypeNumber"], n["isotime"],
+            n["main_category"], n["sub_category"], n["AccountNumber"], n.get("detail_category", ""), None, None)
+        result = assets.run_operation(conn, row["operation_id"], "dealing.create", payload,
+            lambda operation_id: DBmanage.insert_dealing(conn, payload, operation_id))
+        return {"commit_status": "imported", "DealingNumber": result["DealingNumber"], "balance_sync": result["balance_sync"]}
+
+    def teach_memory(self, ident):
+        """Hand rows committed with model or user categories to the Agent's classification memory, so the next import
+        of those merchants is answered from memory. Best effort: the ledger is already written, and rows whose
+        lesson failed are retried after the next commit of this import."""
+        with self.lock(ident):
+            job = self.load(ident)
+            rows = [row for row in job["rows"] if row.get("memory") in {"pending", "failed"}
+                    and (row["normalized"].get("raw_shop_name") or row["normalized"].get("shop_name"))]
+        if not rows:
+            return
+        lessons = [{"raw_shop_name": (n.get("raw_shop_name") or n["shop_name"])[:300], "shop_name": n["shop_name"][:300],
+                    "product_name": (n.get("product_name") or "")[:4000], "main_category": n["main_category"][:100],
+                    "sub_category": n["sub_category"][:100], "detail_category": (n.get("detail_category") or "")[:100],
+                    "amount": str(n.get("price") or "")[:40], "iso_time": str(n.get("isotime") or "")[:40],
+                    "source_id": f"import:{ident}:{row['row_id']}"[:200]}
+                   for row in rows for n in [row["normalized"]]]
+        try:
+            result, state = self.call_agent("/agent/import/remember", {"rows": lessons}), "taught"
+        except Exception as error:
+            result, state = {"error": str(error)[:200]}, "failed"
+        with self.lock(ident):
+            job = self.load(ident)
+            sent = {row["row_id"] for row in rows}
+            for row in job["rows"]:
+                if row["row_id"] in sent:
+                    row["memory"] = state
+            job["memory_sync"] = {"state": state, **(result if isinstance(result, dict) else {})}
+            self.save(job)

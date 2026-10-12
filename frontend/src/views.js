@@ -11,7 +11,8 @@ import { plansView } from './plans-view.js';
 import { overviewChartView, overviewHeatmapView, overviewCategoryDriversView } from './overview-chart.js';
 import { overviewAssetsView } from './overview-assets.js';
 import { runtimeSettingsView } from './runtime-settings-view.js';
-import { gmailSettingsView } from './gmail-settings-view.js';
+import { mailboxSettingsView } from './mailbox-settings.js';
+import { updateSettingsView } from './update-settings.js';
 import { sidebarProfileContent, userProfileSettings } from './user-profile.js';
 import { fullMailImportView } from './full-mail-import-view.js';
 import { shutdownSettingsView } from './system-shutdown.js';
@@ -739,7 +740,7 @@ function settingsView(ctx) {
     '</select></label><div class="settings-connection-check"><div class="connection-results"><span>' +
     statusDot(ctx.state.status.backend) + escapeHtml(text(ctx, "backend")) + '</span><span>' +
     statusDot(ctx.state.status.agent, true) + 'Agent</span></div><button class="button" type="button" data-test-services>' +
-    escapeHtml(text(ctx, "testConnection")) + '</button></div></section>' + gmailSettingsView(ctx) + fullMailImportView(ctx) + runtimeSettingsView(ctx) +
+    escapeHtml(text(ctx, "testConnection")) + '</button></div></section>' + mailboxSettingsView(ctx) + fullMailImportView(ctx) + runtimeSettingsView(ctx) + updateSettingsView(ctx) +
     '<section class="settings-group" aria-labelledby="settings-advanced"><header><h2 id="settings-advanced">' +
     escapeHtml(text(ctx, 'settingsAdvanced')) + '</h2><span class="settings-behavior">' + escapeHtml(text(ctx, 'settingsOnSave')) + '</span></header><label class="setting-switch"><span><strong>' +
     escapeHtml(text(ctx, "developerMode")) + '</strong><small>' + escapeHtml(text(ctx, "developerModeHint")) +

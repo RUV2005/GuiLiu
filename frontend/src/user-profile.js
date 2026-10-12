@@ -31,7 +31,8 @@ export function sidebarProfileContent(ctx, fallback = t(ctx.language, 'currencyB
   spend: 'JPY', asset: currencyName(normalizePrimaryCurrency(ctx.state.settings?.contextCurrency)),
 })) {
   const profile = ctx.state.userProfile;
-  const name = profile?.name || profile?.email || 'Personal';
+  // Gmail on an app password and 163 carry no Google name or photo; the connected address names the account.
+  const name = profile?.name || profile?.email || profile?.mailbox_email || 'Personal';
   const id = profile?.id ? 'ID: ' + profile.id : fallback;
   const picture = safeProfilePicture(profile?.picture);
   return '<span class="profile-avatar"><span aria-hidden="true">' + e([...name][0] || 'P') + '</span>' +

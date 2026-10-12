@@ -33,6 +33,23 @@ from mail_access import (GmailImap, MailAccessError, MailClient, NetEaseMail, ma
                          mailbox_identity, save_mail_config, gmail_authorized)
 
 STEPS = ("api_keys", "gmail", "vector_db", "bank_rules", "account_confirmation", "ocr_source", "complete")
+# A mailbox added from Settings: indexed and searched for banks in the background, then confirmed by the user.
+MAILBOX_JOB_RUNNING = {"indexing", "discovering", "rules"}
+MAILBOX_NAMES = {"gmail": ("Gmail", "Gmail", "Gmail"), "163": ("网易 163 邮箱", "NetEase 163 メール", "NetEase 163 Mail")}
+MAILBOX_NOTICES = {
+    "review": (("{mailbox} 已接入，请确认银行来源", "已为 {mailbox} 建立邮件索引，并识别到 {count} 个新的银行来源。请到「设置 → 邮箱」确认要绑定的账户，确认后会开始导入这个邮箱的历史账单。"),
+               ("{mailbox} を接続しました。銀行の確認をお願いします", "{mailbox} のメールの索引を作成し、新しい銀行の送信元を {count} 件見つけました。「設定 → メール」で紐付ける口座を確認してください。確認後、このメールの過去の明細を取り込みます。"),
+               ("{mailbox} is connected: confirm its banks", "{mailbox} is indexed and {count} new bank sender(s) were found. Confirm their accounts under Settings → Mailboxes; its past statements are imported after that.")),
+    "done": (("{mailbox} 已就绪", "{mailbox} 已完成设置，正在后台导入这个邮箱的历史账单，账单会陆续出现。"),
+             ("{mailbox} の準備ができました", "{mailbox} の設定が完了しました。このメールの過去の明細をバックグラウンドで取り込んでいます。"),
+             ("{mailbox} is ready", "{mailbox} is set up; its past statements are being imported in the background and will appear shortly.")),
+    "failed": (("{mailbox} 接入未完成", "为 {mailbox} 建立索引或识别银行时出错。请到「设置 → 邮箱」重试或取消。"),
+               ("{mailbox} の接続が完了していません", "{mailbox} の索引作成または銀行の識別中にエラーが発生しました。「設定 → メール」から再試行またはキャンセルしてください。"),
+               ("{mailbox} is not finished", "Indexing {mailbox} or finding its banks failed. Retry or cancel under Settings → Mailboxes.")),
+    "rules": (("{mailbox} 的识别规则没有全部生成", "确认后的银行来源有部分识别规则没能生成。请到「设置 → 邮箱」重试，或重新确认银行来源。"),
+              ("{mailbox} の識別ルールが一部作成できませんでした", "確認した銀行の送信元の一部で識別ルールを作成できませんでした。「設定 → メール」から再試行するか、銀行の送信元を確認し直してください。"),
+              ("Some of {mailbox}'s rules were not built", "Recognition rules could not be built for some confirmed bank senders. Retry, or confirm them again, under Settings → Mailboxes.")),
+}
 # Bulk setup may wait longer than interactive or daily mail reads.
 GMAIL_READ_OPTIONS = {"max_retries": 8, "wait_budget": 300.0}
 GMAIL_BATCH_SIZE = 20
@@ -195,6 +212,7 @@ class Initialization:
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.on_complete = lambda: None
+        self.on_mailbox_ready = lambda: None   # BackendAPI starts the new mailbox's history import
         self.thread = None
         self.workers = {}
         self.stopping = threading.Event()
@@ -205,6 +223,11 @@ class Initialization:
             interrupted = True
         if state.get("vector_sync", {}).get("status") == "running":
             state["vector_sync"].update(status="interrupted", error="Submit vector_db to resume background synchronization")
+            interrupted = True
+        # A mailbox being added in Settings stops with the app; Settings offers to retry the part that stopped.
+        job = state.get("mailbox_job") or {}
+        if job.get("state") in {"discovering", "rules"}:
+            job.update(state="failed" if job["state"] == "discovering" else "rules_review", error=None)
             interrupted = True
         if interrupted:
             self.save_state(state)
@@ -288,7 +311,10 @@ class Initialization:
         missing.extend(step for step in STEPS[:-1] if step not in done)
         sources = self.review_sources()
         next_step = next((step for step in STEPS if step not in done), None)
-        return {**state, "completed_steps": done, "agent": agent, "gmail": gmail, "mail": mail, "account_count": accounts,
+        # Once indexing starts, retries must reuse its mail filter; the setup page shows it instead of the controls.
+        manifest = read_json(self.root / "mail_vectors.json")
+        return {**state, "vector_query": manifest.get("query", "") if manifest else None,
+                "completed_steps": done, "agent": agent, "gmail": gmail, "mail": mail, "account_count": accounts,
                 "current_step": state["active_step"] or next_step, "next_step": next_step,
                 "status": "completed" if state["initialized"] else "running" if state["active_step"] else
                           "failed" if state["error"] else "waiting_input",
@@ -359,6 +385,235 @@ class Initialization:
                 return self.complete()
         return self.status()
 
+    def mailbox_overview(self):
+        """Settings mailbox panel: connections, and a mailbox being added with its progress and the bank sources it
+        found. No Agent call."""
+        state = self.state()
+        mail = mailbox_status()
+        try:
+            mail["gmail_oauth_available"] = bool(self.oauth_client())
+        except SetupError:
+            mail["gmail_oauth_available"] = False
+        job = state.get("mailbox_job")
+        token = self.token_path()
+        result = {"initialized": state["initialized"], "mail": mail, "gmail_email": state.get("gmail_email"), "job": job,
+                  "gmail_token_updated": token.stat().st_mtime if token.is_file() else None,
+                  "indexing": state.get("vector_sync", {}).get("status") == "running" and not job}
+        if job:
+            sync = state.get("vector_sync") or {}
+            result["job_progress"] = {"indexed": (sync.get("bootstrap_by_provider") or {}).get(job["provider"]),
+                                      "indexing_status": sync.get("status"), "indexing_error": sync.get("error"),
+                                      "discovery": state.get("progress") if job["state"] == "discovering" else None}
+            if job["state"] in {"review", "rules_review"}:
+                result["sources"] = [s for s in self.review_sources() if not s.get("confirmed") or s.get("status") == "rules_review"]
+                result["accounts"] = self.account_options()
+        return result
+
+    def mailboxes_allowed(self, config, adding=False):
+        """Whether a mailbox selection fits the vector checkpoint: fixed once indexing starts, except that adding a
+        mailbox from Settings keeps every indexed one and appends the new one."""
+        manifest = read_json(self.root / "mail_vectors.json")
+        if manifest is None:
+            return True
+        locked, current = manifest.get("mailboxes", ["gmail"]), mailbox_identity(config)
+        job = self.state().get("mailbox_job") or {}
+        return current == locked or ((adding or job.get("state") not in {None, "done"}) and set(locked) < set(current))
+
+    def connect_mailbox(self, request):
+        """Settings: connect the mailbox that is not connected yet, or renew one that is (same account only).
+
+        A new mailbox then starts its background job; renewing credentials changes nothing else. Gmail through Google
+        returns an authorization URL, and the OAuth callback continues the same way."""
+        provider = request.connect_provider
+        with self.lock:
+            state = self.state()
+            if not state["initialized"]:
+                raise SetupError("Finish setup first", 409)
+            if not provider or request.providers != [provider]:
+                raise SetupError("Connect one mailbox at a time")
+            config = mail_config()
+            adding = provider not in config["providers"]
+            if adding and state.get("mailbox_job") and state["mailbox_job"]["state"] != "done":
+                raise SetupError("Finish or cancel the mailbox being added first", 409)
+            if adding and state.get("vector_sync", {}).get("status") == "running":
+                raise SetupError("Wait for mail indexing to finish", 409)
+            before = {"providers": list(config["providers"]), "gmail_email": state.get("gmail_email")}
+            data = request.model_copy(update={"providers": sorted(set(config["providers"]) | {provider},
+                                                                  key=("gmail", "163").index)})
+            authorization = self.configure_mail(data, from_settings=True, adding=adding)
+            if authorization:
+                # Google OAuth: the callback finishes the connection; remember what to restore on cancel.
+                atomic_json(self.root / "mailbox_pending.json", {"provider": provider, "adding": adding, **before})
+                return {**self.mailbox_overview(), **authorization}
+            if adding:
+                self.start_mailbox_job(provider, before)
+        return self.mailbox_overview()
+
+    def start_mailbox_job(self, provider, before):
+        with self.lock:
+            state = self.state()
+            state["mailbox_job"] = {"id": secrets.token_hex(6), "provider": provider, "state": "indexing",
+                                    "previous_providers": [p for p in before["providers"] if p != provider],
+                                    "previous_gmail_email": before.get("gmail_email"),
+                                    "started_at": datetime.now(timezone.utc).isoformat(), "error": None}
+            self.save_state(state)
+        self._index_new_mailbox()
+
+    def _job(self, **values):
+        with self.lock:
+            state = self.state()
+            job = state.get("mailbox_job")
+            if job:
+                job.update(values, updated_at=datetime.now(timezone.utc).isoformat())
+                self.save_state(state)
+            return job
+
+    def _index_new_mailbox(self):
+        """Index the new mailbox with setup's first filter; once its first mails are done, find its banks."""
+        manifest = read_json(self.root / "mail_vectors.json") or {}
+
+        def on_bootstrap():
+            if (self.state().get("mailbox_job") or {}).get("state") == "indexing":
+                self._job(state="discovering", error=None)
+                threading.Thread(target=self._discover_for_mailbox, name="mailbox-discovery", daemon=True).start()
+
+        def index():
+            try:
+                return self.prepare_vectors(manifest.get("query", ""), on_bootstrap=on_bootstrap)
+            except Exception:
+                # Only a failure before the first mails are done stops the job; later ones are background sync's.
+                if (self.state().get("mailbox_job") or {}).get("state") == "indexing" and not self.stopping.is_set():
+                    self._notify("failed")
+                raise
+        self.launch("vector_db", index)
+
+    def _discover_for_mailbox(self):
+        try:
+            self.prepare_banks()
+            found = [s for s in self.review_sources() if not s.get("confirmed")]
+            if found:
+                self._job(state="review", found=len(found))
+                self._notify("review", count=len(found))
+            else:
+                self._finish_mailbox_job(found=0)
+        except Exception as error:
+            self._job(state="failed", error=str(error) if isinstance(error, (SetupError, MailAccessError))
+                      else type(error).__name__ + ": bank discovery failed")
+            self._notify("failed")
+
+    def confirm_mailbox_sources(self, choices):
+        """Settings: bind or skip every bank source the new mailbox brought, then build their rules."""
+        with self.lock:
+            job = self.state().get("mailbox_job")
+            if not job or job["state"] not in {"review", "rules_review"}:
+                raise SetupError("There is nothing to confirm", 409)
+            self.confirm_sources(choices)
+            if any(not s.get("confirmed") for s in self.review_sources()):
+                raise SetupError("Bind or skip every new bank source")
+            self._job(state="rules", error=None)
+        threading.Thread(target=self._build_rules_for_mailbox, name="mailbox-rules", daemon=True).start()
+        return self.mailbox_overview()
+
+    def _build_rules_for_mailbox(self):
+        try:
+            if self.prepare_bank_rules():
+                self._finish_mailbox_job()
+                return
+            self._job(state="rules_review")
+        except Exception as error:
+            self._job(state="rules_review", error=str(error) if isinstance(error, (SetupError, MailAccessError))
+                      else type(error).__name__ + ": rule generation failed")
+        self._notify("rules")
+
+    def _finish_mailbox_job(self, **values):
+        with self.lock:
+            state = self.state()
+            job = state.get("mailbox_job")
+            if not job:
+                return
+            job.update(values, state="done", finished_at=datetime.now(timezone.utc).isoformat(), error=None)
+            # The new mailbox's history is imported like setup's first visit; only an import started now counts.
+            state["first_mail_import"] = {"status": "pending", "since": datetime.now(timezone.utc).isoformat()}
+            self.save_state(state)
+        self._notify("done")
+        try:
+            self.on_mailbox_ready()
+        except Exception:
+            logging.getLogger("uvicorn.error").exception("Could not start the new mailbox's import")
+
+    def retry_mailbox_job(self):
+        """Settings: run the failed part of a mailbox job again; finished work is reused."""
+        state = self.state()
+        job = state.get("mailbox_job") or {}
+        indexing_failed = job.get("state") == "indexing" and state.get("vector_sync", {}).get("status") in {"failed", "interrupted"}
+        if job.get("state") == "rules_review":
+            self._job(state="rules", error=None)
+            threading.Thread(target=self._build_rules_for_mailbox, name="mailbox-rules", daemon=True).start()
+        elif job.get("state") == "failed" or indexing_failed:
+            self._job(state="indexing", error=None)
+            self._index_new_mailbox()
+        else:
+            raise SetupError("There is nothing to retry", 409)
+        return self.mailbox_overview()
+
+    def dismiss_mailbox_job(self):
+        with self.lock:
+            state = self.state()
+            if (state.get("mailbox_job") or {}).get("state") != "done":
+                raise SetupError("The mailbox is still being added", 409)
+            state.pop("mailbox_job")
+            self.save_state(state)
+        return self.mailbox_overview()
+
+    def cancel_mailbox_job(self):
+        """Settings: stop adding the mailbox and restore the mailboxes, index checkpoint and Google consent from before."""
+        job = self.state().get("mailbox_job")
+        if not job or job["state"] == "done":
+            raise SetupError("No mailbox is being added", 409)
+        self.stopping.set()
+        for thread in list(self.workers.values()):
+            thread.join(timeout=15)
+        with self.lock:
+            state = self.state()
+            config = mail_config()
+            restored = {**config, "providers": list(job["previous_providers"])}
+            restored.pop("gmail" if job["provider"] == "gmail" else "netease163", None)
+            save_mail_config(restored)
+            if job["provider"] == "gmail" and not job.get("previous_gmail_email"):
+                for path in (self.token_path(), self.root / "google_profile.json"):
+                    path.unlink(missing_ok=True)
+            state["gmail_email"] = job.get("previous_gmail_email")
+            manifest_path = self.root / "mail_vectors.json"
+            manifest = read_json(manifest_path)
+            if manifest is not None:
+                kept = [m for m in manifest["ids"] if MailClient.provider_for(m) in restored["providers"]]
+                manifest.update(mailboxes=mailbox_identity(restored), ids=kept,
+                                done=[m for m in manifest.get("done", []) if m in set(kept)])
+                atomic_json(manifest_path, manifest)
+                sync = state.get("vector_sync") or {}
+                sync.update(status="completed" if len(manifest["done"]) == len(kept) else "interrupted",
+                            total=len(kept), vectorized=len(manifest["done"]), error=None)
+                state["vector_sync"] = sync
+            # Bank sources found only in the cancelled mailbox and never confirmed are dropped.
+            atomic_json(self.root / "sources.json", [s for s in read_json(self.root / "sources.json", []) if s.get("confirmed")])
+            state.pop("mailbox_job", None)
+            state.update(active_step=None, progress={})
+            self.save_state(state)
+        return self.mailbox_overview()
+
+    def _notify(self, kind, **values):
+        """A message in the workspace's information feed, in the interface language. Best effort."""
+        job = self.state().get("mailbox_job") or {}
+        language = {"zh": 0, "ja": 1, "en": 2}.get(read_saved_settings().get("ui", {}).get("language"), 0)
+        title, content = MAILBOX_NOTICES[kind][language]
+        names = {"mailbox": MAILBOX_NAMES.get(job.get("provider"), ("", "", ""))[language], **{k: str(v) for k, v in values.items()}}
+        try:
+            self.agent("POST", "/agent/initialization/notice", {
+                "title": title.format(**names), "content": content.format(**names),
+                "key": "mailbox-" + str(job.get("id", "x")) + "-" + kind})
+        except Exception:
+            logging.getLogger("uvicorn.error").warning("Could not post the mailbox notice")
+
     def check_api_keys(self, settings):
         """Test keys with one tiny request per service, save only those that work, and pass the step once both do.
 
@@ -384,7 +639,7 @@ class Initialization:
             self.finish_step("api_keys")
         return self.status()
 
-    def configure_mail(self, request):
+    def configure_mail(self, request, *, from_settings=False, adding=False):
         if len(request.providers) != len(set(request.providers)):
             raise SetupError("Select each mailbox provider only once")
         if request.connect_provider and request.connect_provider not in request.providers:
@@ -429,14 +684,19 @@ class Initialization:
             if not code or len(code) > 256 or any(c.isspace() or ord(c) < 32 for c in code):
                 raise SetupError("163 requires a client authorization code")
             updated["netease163"] = {**old, "email": email, "authorization_code": code}
-        manifest = read_json(self.root / "mail_vectors.json")
-        if manifest is not None and mailbox_identity(updated) != manifest.get("mailboxes", ["gmail"]):
+        if not self.mailboxes_allowed(updated, adding=adding):
             raise SetupError("Mailbox selection is locked after vector import starts; use a separate environment", 409)
         if verify_netease:
             client = NetEaseMail(updated["netease163"])
             try:
                 client.connect()
                 updated["netease163"]["uidvalidity"] = client.validity
+                # Best effort: tells the setup page whether webmail still limits clients to the last 30 days.
+                try:
+                    oldest, recent = client.inbox_reach()
+                except Exception:
+                    oldest, recent = None, False
+                updated["netease163"].update(oldest_mail=oldest, recent_only=recent)
             finally:
                 client.close()
         if gmail_imap:
@@ -448,10 +708,18 @@ class Initialization:
                 client.close()
         self.settings(SetupSettings(google_client_id=request.google_client_id,
                                     google_client_secret=request.google_client_secret))
-        if request.connect_provider == "gmail" and not gmail_imap and not self.gmail_status()["authorized"]:
+        if request.connect_provider == "gmail" and not gmail_imap and (from_settings or not self.gmail_status()["authorized"]):
             # A cancelled OAuth attempt must not disable an already connected 163 mailbox.
+            if from_settings:
+                return self.authorize(connect_mailbox=True, purpose="mailbox")
             return {**self.status(), **self.authorize(connect_mailbox=True)}
         save_mail_config(updated)
+        if from_settings:
+            if gmail_imap:
+                state = self.state()
+                state["gmail_email"] = updated["gmail"]["email"]
+                self.save_state(state)
+            return None
         state = self.state()
         state["completed_steps"] = [step for step in state["completed_steps"] if step != "gmail"]
         if gmail_imap:
@@ -603,9 +871,13 @@ class Initialization:
                 oauth_available = bool(self.oauth_client())
             except SetupError:
                 oauth_available = False
+            # Gmail on an app password and 163 give no Google name, photo or ID; the address still names the account.
+            config = mail_config()
+            netease = (config.get("netease163") or {}).get("email") if "163" in config["providers"] else None
             return {"authorized": gmail["authorized"], "id": saved.get("id"),
                     "name": saved.get("name"), "picture": saved.get("picture"),
                     "email": gmail["email"], "updated_at": saved.get("updated_at"),
+                    "mailbox_email": gmail["email"] or netease,
                     "needs_authorization": not bool(saved.get("id")), "oauth_available": oauth_available}
 
     def authorize(self, *, purpose="initialization", connect_mailbox=False):
@@ -642,9 +914,14 @@ class Initialization:
             if pending.get("expires", 0) < time.time() or not secrets.compare_digest(pending.get("state", ""), state):
                 raise SetupError("OAuth state is invalid or expired")
             profile_only = pending.get("purpose") == "profile"
+            from_settings = pending.get("purpose") == "mailbox"
+            settings_pending = read_json(self.root / "mailbox_pending.json", {}) if from_settings else {}
             if profile_only:
                 if not current.get("gmail_email"):
                     raise SetupError("Connect Gmail during initialization first", 409)
+            elif from_settings:
+                if not current["initialized"] or settings_pending.get("provider") != "gmail":
+                    raise SetupError("Start connecting Gmail from Settings again", 409)
             elif current["initialized"] or "api_keys" not in current["completed_steps"] or current["active_step"]:
                 raise SetupError("Gmail authorization is not the current setup step", 409)
             (self.root / "oauth_pending.json").unlink()
@@ -718,8 +995,7 @@ class Initialization:
                 connected_config.pop("gmail", None)  # OAuth replaces an IMAP setup only once it succeeds.
                 connected_config["providers"] = [p for p in ("gmail", "163")
                                                  if p == "gmail" or p in connected_config["providers"]]
-                manifest = read_json(self.root / "mail_vectors.json")
-                if manifest is not None and mailbox_identity(connected_config) != manifest.get("mailboxes", ["gmail"]):
+                if not self.mailboxes_allowed(connected_config, adding=bool(settings_pending.get("adding"))):
                     raise SetupError("Mailbox selection is locked after vector import starts; use a separate environment", 409)
             atomic_json(self.token_path(), token)
             os.chmod(self.token_path(), 0o600)
@@ -729,7 +1005,11 @@ class Initialization:
             os.chmod(self.root / "google_profile.json", 0o600)
             if connected_config is not None:
                 save_mail_config(connected_config)
-            if not profile_only and mailbox_status()["authorized"]:
+            if from_settings:
+                (self.root / "mailbox_pending.json").unlink(missing_ok=True)
+                if settings_pending.get("adding"):
+                    self.start_mailbox_job("gmail", settings_pending)
+            elif not profile_only and mailbox_status()["authorized"]:
                 self.finish_step("gmail")
         return self.gmail_status()
 
@@ -738,21 +1018,31 @@ class Initialization:
             raise SetupError("Invalid mail ID")
         return self.root / "mails" / (msgid + ".json")
 
-    def prepare_vectors(self, query):
+    def prepare_vectors(self, query, on_bootstrap=None):
         from Gmail_Manage import GmailReadPacer
         from adr_vector_memory_flow import build_adr_memory_payload
         from database import DBmanage
         self.agent("POST", "/agent/initialization/prepare")
         manifest_path = self.root / "mail_vectors.json"
         manifest = read_json(manifest_path)
-        identities = mailbox_identity()
-        if manifest and manifest.get("mailboxes", ["gmail"]) != identities:
+        config = mail_config()
+        identities = mailbox_identity(config)
+        if manifest and manifest.get("mailboxes", ["gmail"]) != identities and not self.mailboxes_allowed(config):
             raise SetupError("Mailbox selection differs from the vector import checkpoint")
         if manifest and manifest["query"] != query:
             raise SetupError("Retry with the same mail query as the first vector step")
         gmail = MailClient(query)
         gmail.connect_gmail()
         pacer = GmailReadPacer(stop_event=self.stopping)
+        if manifest and manifest.get("mailboxes", ["gmail"]) != identities:
+            # A mailbox added from Settings: list only its mail, with the first step's filter, after what is indexed.
+            added = [p for p, identity in zip(config["providers"], identities) if identity not in manifest["mailboxes"]]
+            reader = MailClient(query)
+            reader.config = {**reader.config, "providers": added}
+            listed = reader.get_all_msgid(stop_event=self.stopping, log_event=self.log_google_event,
+                                          read_options={**GMAIL_READ_OPTIONS, "pacer": pacer})
+            manifest.update(mailboxes=identities, ids=list(dict.fromkeys(manifest["ids"] + listed)))
+            atomic_json(manifest_path, manifest)
         if manifest is None:
             manifest = {"query": query, "mailboxes": identities, "ids": list(dict.fromkeys(gmail.get_all_msgid(
                 stop_event=self.stopping, log_event=self.log_google_event,
@@ -766,6 +1056,8 @@ class Initialization:
         self.vector_progress(manifest["ids"], done)
         # Keep background mail out of the batch that unlocks bank discovery.
         for phase in (bootstrap, background):
+            if phase is background and on_bootstrap is not None:
+                on_bootstrap()   # every mailbox's first mails are indexed; the rest continues here
             pending = [msgid for msgid in phase if msgid not in done]
             for offset in range(0, len(pending), GMAIL_BATCH_SIZE):
                 self.check_stop()
@@ -789,6 +1081,8 @@ class Initialization:
                         done.add(msgid)
                     else:
                         failed.append(msgid)
+                # A cancelled mailbox addition restores the checkpoint; a batch finishing after that must not undo it.
+                self.check_stop()
                 manifest["done"] = sorted(done)
                 atomic_json(manifest_path, manifest)
                 self.vector_progress(manifest["ids"], done)
@@ -808,7 +1102,8 @@ class Initialization:
 
     def review_sources(self):
         sources = use_sender_rules(read_json(self.root / "sources.json", []))
-        if self.state()["initialized"]:
+        state = self.state()
+        if state["initialized"] and (state.get("mailbox_job") or {}).get("state") in {None, "done"}:
             return sources
         for source in sources:
             if not source.get("confirmed", False):
@@ -1043,8 +1338,9 @@ class Initialization:
                 result = self.status()
                 if result["missing"]:
                     raise SetupError("Environment is not ready: " + ", ".join(result["missing"]), 409)
-                state = {**before, "initialized": True, "completed_at": time.time(),
-                         "completed_steps": list(STEPS)}
+                # The workspace starts one full import of the mailbox on its first visit (loop.start_first_mail_import).
+                state = {**before, "initialized": True, "completed_at": time.time(), "completed_steps": list(STEPS),
+                         "first_mail_import": {"status": "pending", "since": datetime.now(timezone.utc).isoformat()}}
                 self.save_state(state)
             try:
                 self.agent("POST", "/agent/initialization/complete")

@@ -6,17 +6,29 @@
 
 ```text
 GUILIU/
-  frontend/       原生 HTML / CSS / JS、静态资源和同源 API 代理
-  backend/        FastAPI、账单与账户、Gmail／163、初始化和日常处理
-  agent/          FastAPI、ReAct、Prompt、图表、会话、计划和自动任务
-  run.py          三服务统一启动 / 停止 / 文件校验
-  smoke.py        隔离部署接口检查，写入虚构测试账户
+  launch.py           启动器：按 current.json 启动对应版本，切换在线更新，新版本启动失败时自动回退
+  current.json        当前使用的版本（启动器维护，不属于发布文件）
+  start_windows.cmd / stop_windows.cmd
+  runtime/            Python 与 Node 运行环境（各版本共用）
+  versions/<版本>/    该版本的程序文件
+    frontend/         原生 HTML / CSS / JS、静态资源和同源 API 代理
+    backend/          FastAPI、账单与账户、Gmail／163、初始化和日常处理
+    agent/            FastAPI、ReAct、Prompt、图表、会话、计划和自动任务
+    run.py            三服务统一启动 / 停止 / 文件校验
+    smoke.py          隔离部署接口检查，写入虚构测试账户
+    RELEASE.json      版本来源、源码摘要和打包调整记录
+    MANIFEST.json     该版本程序文件的 SHA-256 清单
+  MANIFEST.json       包根目录共享文件的 SHA-256 清单
   requirements.txt
-  RELEASE.json    版本来源、源码摘要和打包调整记录
-  MANIFEST.json   发布文件 SHA-256 清单
 ```
 
-首次启动才创建 `.runtime/`：配置、SQLite、向量库、会话、凭据、初始化状态和日志均属于当前副本。银行正则及邮件附件还可能写入当前副本的 backend 目录；备份时应覆盖整个运行副本。不要把运行后的目录重新压缩当成干净发布包。
+首次启动才创建 `.runtime/`：配置、SQLite、向量库、会话、凭据、初始化状态、银行识别规则、邮件附件和日志都在这里，程序文件目录里不保存任何用户数据。备份或迁移时复制 `.runtime/` 即可。不要把运行后的目录重新压缩当成干净发布包。
+
+### 更新
+
+设置页的「版本与更新」会读取 GitHub 最新 Release 中的 `latest.json`（用发布密钥签名，程序内置公钥校验）。发现新版本时可一键更新：下载约几 MB 的程序更新包，核对签名中的 SHA-256 与大小，并按包内 `MANIFEST.json` 逐个校验文件后放入 `versions/<新版本>/`；随后三端重启，启动器在切换前备份 `.runtime/data` 到 `.runtime/backups/`，新版本没有正常启动时自动回到原版本并恢复备份。始终保留当前与上一个版本、最近两份备份。运行环境（Python、Node 或依赖锁）有变化的版本无法在线更新，设置页会提示下载完整包。
+
+从 rc.11 或更早的版本升级：把新版本完整解压到新文件夹，再把旧文件夹中的 `.runtime/` 整个复制过来；旧版本的银行识别规则在旧文件夹的 `backend/ZhenZeJson/`，一并复制到新文件夹的 `.runtime/data/bank-rules/`（不复制也能用，程序会按需重新生成，但会产生模型费用）。
 
 未打包：API Key、OAuth 客户端凭据、Gmail Token、邮件、账单、账户、向量库、聊天记录、个人画像、测试页面、测试自动填入工具、本机环境和 Git 历史。预设与 Prompt 是代码配置，不包含运行记录。本项目原创代码采用 MIT 许可证，见根目录 LICENSE；第三方依赖保留各自的许可证，见 THIRD_PARTY_NOTICES.md。
 
@@ -26,7 +38,7 @@ GUILIU/
 
 适用于 Windows 10 / 11 x64。包内有 `runtime/` 和 `RUNTIMES.json` 时，无需安装 Python、Node、pip 或 npm，也不需要执行 `install_windows.ps1`。完整解压到有写入权限的文件夹后，双击 `start_windows.cmd`；在页面中一键关闭，或双击 `stop_windows.cmd`。不要在 ZIP 预览窗口中运行。
 
-运行环境固定使用包内目录，不依赖系统 Python、Node 或 Anaconda。文件校验可运行 `runtime\python\python.exe -B run.py verify`。下文源码版命令中的 `.venv\Scripts\python.exe` 可替换为 `runtime\python\python.exe`，并省略 `--node`。首次使用仍需自己的 API Key 和邮箱授权；模型与邮件服务需要网络。运行时和依赖的版本、官方来源、哈希与许可证随包附带。
+运行环境固定使用包内目录，不依赖系统 Python、Node 或 Anaconda。文件校验可运行 `runtime\python\python.exe -B launch.py verify`。下文源码版命令中的 `.venv\Scripts\python.exe` 可替换为 `runtime\python\python.exe`，并省略 `--node`。首次使用仍需自己的 API Key 和邮箱授权；模型与邮件服务需要网络。运行时和依赖的版本、官方来源、哈希与许可证随包附带。
 
 ### 源码版与离线依赖版
 
@@ -40,8 +52,8 @@ Windows PowerShell：
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m pip check
-.\.venv\Scripts\python.exe run.py verify
-.\.venv\Scripts\python.exe run.py serve --node "C:\实际安装路径\node.exe"
+.\.venv\Scripts\python.exe launch.py verify
+.\.venv\Scripts\python.exe launch.py serve --node "C:\实际安装路径\node.exe"
 ```
 
 macOS / Linux 对应命令（本次发布需以验证报告为准，不把 Windows 测试等同于 Mac 实机通过）：
@@ -49,13 +61,13 @@ macOS / Linux 对应命令（本次发布需以验证报告为准，不把 Windo
 ```sh
 python3.13 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python run.py verify
-.venv/bin/python run.py serve --node /实际安装路径/node
+.venv/bin/python launch.py verify
+.venv/bin/python launch.py serve --node /实际安装路径/node
 ```
 
 默认前端 http://127.0.0.1:3000 ，Backend 8001，Agent 8000。端口被占用时启动器自动改用空闲端口（优先沿用这个副本上次的端口，再往后顺延），浏览器自动打开实际地址，不结束其他进程；实际端口记录在 `.runtime/ports.json`。命令行明确传入 `--frontend-port`、`--backend-port`、`--agent-port` 时按指定端口启动，被占用则明确退出。使用 Gmail OAuth 的 Web 客户端时回调端口必须与登记的一致，请显式传入 `--backend-port 8001` 或改用桌面客户端。使用 `run.py`，不要直接分别启动两个 API，否则会失去统一的路径与环境隔离。
 
-退出前台运行可按 Ctrl+C；后台运行时用同一副本的 `python run.py stop`。日志位于 `.runtime/logs/`。启动器不会修改全局环境变量，不读取父目录 `.env`，不会继承原项目的数据库路径或 API Key。配置变更后重启当前副本。
+退出前台运行可按 Ctrl+C；后台运行时用同一副本的 `python launch.py stop`。日志位于 `.runtime/logs/`。启动器不会修改全局环境变量，不读取父目录 `.env`，不会继承原项目的数据库路径或 API Key。配置变更后重启当前副本。
 
 ## 首次初始化
 
@@ -90,15 +102,15 @@ OpenAI 继续使用同步多文本 Embedding 请求，保留原有字段与截�
 必须从 ZIP 解压到一个全新目录，不能直接运行打包源目录。端口和浏览器 Origin 与主站不同：
 
 ```powershell
-.\.venv\Scripts\python.exe run.py serve --node "C:\实际安装路径\node.exe" --frontend-port 5178 --backend-port 8101 --agent-port 8100 --smoke-test
+.\.venv\Scripts\python.exe launch.py serve --node "C:\实际安装路径\node.exe" --frontend-port 5178 --backend-port 8101 --agent-port 8100 --smoke-test
 # 另开终端，在同一 GUILIU 目录：
-.\.venv\Scripts\python.exe smoke.py --frontend-port 5178
+.\.venv\Scripts\python.exe versions\<版本>\smoke.py --frontend-port 5178
 ```
 
 该模式禁用日常任务、市场行情和汇率网络拉取。测试仍运行真实 FastAPI、数据库和前端代理，不伪造 initialized=true、不带真实密钥、不调用 Gmail 或 LLM。测试创建一个虚构现金账户并验证幂等与余额校准，不创建消费记录。重启后使用输出中的账户编号：
 
 ```powershell
-.\.venv\Scripts\python.exe smoke.py --frontend-port 5178 --reuse-account <账户编号>
+.\.venv\Scripts\python.exe versions\<版本>\smoke.py --frontend-port 5178 --reuse-account <账户编号>
 ```
 
 成功报告在 GUILIU 的上一级目录。接口通过不代表真实授权、模型调用、邮件向量化、OCR、完整初始化或所有界面交互均已通过，这些应分别验收。

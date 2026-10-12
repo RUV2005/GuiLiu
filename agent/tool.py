@@ -439,6 +439,35 @@ def create_shop_name_api(
             "result": None
         }
 
+def infer_memory_merchant_type(name, canonical_name, main_category, sub_category):
+    """Merchant type for classification memory, shared by the daily classifier and statement import.
+
+    Platforms and general stores sell many kinds of goods, so their name alone must not fix a category."""
+    text = f"{name or ''} {canonical_name or ''}".lower()
+    platform_keys = [
+        "amazon", "rakuten", "yahoo", "qoo10", "mercari",
+        "uber", "ubereats", "uber eats", "apple", "google", "paypay",
+    ]
+    generic_keys = [
+        "seven-eleven", "7-eleven", "familymart", "lawson",
+        "super", "supermarket", "drug", "pharmacy", "matsumotokiyoshi",
+        "comodiiida", "comodi", "yaoko", "welcia", "sugi pharmacy", "drugseims",
+        "便利店", "超市", "药妆", "药局", "薬局",
+        "スーパー", "コンビニ", "ドラッグストア",
+    ]
+
+    if any(key in text for key in platform_keys):
+        return "platform", False
+
+    if any(key in text for key in generic_keys):
+        return "generic_store", False
+
+    if str(sub_category or "") in {"便利店", "食材", "药妆店", "日用品", "日用杂货"}:
+        return "generic_store", False
+
+    return "single_stable", True
+
+
 def create_classification_memory_api(
     source_type="llm_classified_sample",
     source_id="",

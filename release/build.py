@@ -1,6 +1,7 @@
 """Allowlisted source release; never copy a working directory wholesale."""
 import argparse
 import ast
+import base64
 from datetime import datetime, timezone
 from email.parser import BytesParser
 import hashlib
@@ -96,9 +97,16 @@ def build(args):
     for source in sources.values():
         if out.is_relative_to(source):
             raise ValueError('Output must be outside all source projects')
+    # The version names its folder and the update check; the platform is separate (accepts 0.1.0-rc.12-win-x64 too).
+    version = args.version[:-len('-' + args.platform)] if args.version.endswith('-' + args.platform) else args.version
+    if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?', version):
+        raise ValueError('Version must look like 0.1.0 or 0.1.0-rc.12')
+    label = version + '-' + args.platform
     out.mkdir(parents=True, exist_ok=False)
     root = out / 'GUILIU'
     root.mkdir()
+    # Program files of this version; launch.py, runtime/, dependencies and user data (.runtime/) stay beside versions/.
+    app = root / 'versions' / version
     copies = {}
 
     def copy(source, target):
@@ -120,23 +128,23 @@ def build(args):
             copy(item, target / rel)
 
     for name in ('index.html', 'initialization.html'):
-        copy(sources['frontend'] / name, root / 'frontend' / name)
-    tree(sources['frontend'] / 'src', root / 'frontend/src',
+        copy(sources['frontend'] / name, app / 'frontend' / name)
+    tree(sources['frontend'] / 'src', app / 'frontend/src',
          {'.js', '.mjs', '.css', '.json', '.txt', '.md'},
          ('test-autofill-server.mjs', 'check.mjs', 'README.md'))
     # Keep the vendored library notice, but not development documentation with local paths.
     copy(sources['frontend'] / 'src/vendor/tanstack-virtual-core/README.md',
-         root / 'frontend/src/vendor/tanstack-virtual-core/README.md')
-    tree(sources['frontend'] / 'assets', root / 'frontend/assets',
+         app / 'frontend/src/vendor/tanstack-virtual-core/README.md')
+    tree(sources['frontend'] / 'assets', app / 'frontend/assets',
          {'.svg', '.png', '.jpg', '.jpeg', '.webp', '.woff', '.woff2', '.txt'})
     # Extension-less notices are skipped by the allowlists above, but MIT / ISC require them in every copy.
     for notice in ('src/vendor/tanstack-virtual-core/LICENSE', 'assets/category-icons/LICENSE'):
-        copy(sources['frontend'] / notice, root / 'frontend' / notice)
-    json_file(root / 'frontend/package.json', {'name': 'guiliu-frontend', 'private': True,
-              'version': args.version, 'type': 'module', 'engines': {'node': '>=22'},
+        copy(sources['frontend'] / notice, app / 'frontend' / notice)
+    json_file(app / 'frontend/package.json', {'name': 'guiliu-frontend', 'private': True,
+              'version': version, 'type': 'module', 'engines': {'node': '>=22'},
               'scripts': {'start': 'node src/server.mjs'}})
     # run.py serves the frontend with a same-origin proxy, so the source defaults must point at it.
-    config = (root / 'frontend/src/config.js').read_text(encoding='utf-8')
+    config = (app / 'frontend/src/config.js').read_text(encoding='utf-8')
     if 'backendPath: "/backend"' not in config or 'agentPath: "/agent"' not in config:
         raise ValueError('Frontend defaults must use the same-origin /backend and /agent paths')
 
@@ -145,10 +153,10 @@ def build(args):
     for role in ('backend', 'agent'):
         for source in sorted(sources[role].glob('*.py')):
             if source.name not in excluded:
-                copy(source, root / role / source.name)
+                copy(source, app / role / source.name)
     for name in ('alipay_v1.json', 'wechat_v1.json'):
-        copy(sources['backend'] / 'import_presets' / name, root / 'backend/import_presets' / name)
-    tree(sources['agent'] / 'prompt_store', root / 'agent/prompt_store', {'.json'})
+        copy(sources['backend'] / 'import_presets' / name, app / 'backend/import_presets' / name)
+    tree(sources['agent'] / 'prompt_store', app / 'agent/prompt_store', {'.json'})
 
     defaults_tree = ast.parse((sources['backend'] / 'runtime_settings.py').read_text(encoding='utf-8-sig'))
     defaults = next(ast.literal_eval(n.value) for n in defaults_tree.body if isinstance(n, ast.Assign)
@@ -156,18 +164,22 @@ def build(args):
     defaults['storage'] = {'backend_db': '../.runtime/data/backend.sqlite3', 'server_data_dir': '../.runtime/data'}
     # Mail sync, ADR and automation keep the code defaults (on). They start only once setup completes,
     # and the setup page tells the user before finishing; the settings page can turn each one off.
-    json_file(root / 'backend/config/settings.json', defaults)
+    json_file(app / 'backend/config/settings.json', defaults)
 
     # Vendored DDGS, copied unchanged from this reviewed upstream commit.
     vendor = sources['agent'] / 'vendor/ddgs'
     expected = '70a5635510fb8d5b15d5ba6ceced6a67e212149b'
-    tree(vendor / 'ddgs', root / 'agent/vendor/ddgs/ddgs', {'.py', '.json', '.txt'})
+    tree(vendor / 'ddgs', app / 'agent/vendor/ddgs/ddgs', {'.py', '.json', '.txt'})
     for name in ('LICENSE.md', 'README.md', 'pyproject.toml'):
-        copy(vendor / name, root / 'agent/vendor/ddgs' / name)
-    for name in ('run.py', 'smoke.py', 'requirements.txt', 'constraints.txt', 'THIRD_PARTY_NOTICES.md',
-                 'LICENSE', 'DEPLOYMENT.md'):
+        copy(vendor / name, app / 'agent/vendor/ddgs' / name)
+    # An update package travels alone, so it carries the license and notices too.
+    for name in ('run.py', 'smoke.py', 'LICENSE', 'THIRD_PARTY_NOTICES.md'):
+        copy(ROOT / name, app / name)
+    for name in ('requirements.txt', 'constraints.txt', 'THIRD_PARTY_NOTICES.md', 'LICENSE', 'DEPLOYMENT.md'):
         copy(ROOT / name, root / name)
-    # Platform launchers live in release/<platform>/ in the repository and sit at the package root.
+    # The launcher picks the version; platform launchers live in release/<platform>/ and sit at the package root.
+    copy(HERE / 'launch.py', root / 'launch.py')
+    json_file(root / 'current.json', {'version': version, 'previous': None, 'trial': False})
     for name in ('install_windows.ps1', 'start_windows.cmd', 'stop_windows.cmd'):
         copy(HERE / 'windows' / name, root / name)
     # The package opens with the product introduction; the full install and operations guide ships beside it.
@@ -199,7 +211,7 @@ def build(args):
     if getattr(args, 'runtime_downloads', None):
         if not wheel_count:
             raise ValueError('Portable runtime requires the complete offline wheelhouse')
-        runtimes = bundle_runtimes(args.runtime_downloads, root)
+        runtimes = bundle_runtimes(args.runtime_downloads, root, app)
 
     hits = []
     for file in root.rglob('*'):
@@ -210,7 +222,7 @@ def build(args):
         if file.suffix.lower() in TEXT and not {'licenses', 'dependency-sources', 'runtime'}.intersection(file.relative_to(root).parts):
             value = file.read_text(encoding='utf-8-sig')
             # These exact UI placeholders are public examples, not configured mailboxes.
-            if file.relative_to(root).as_posix() == 'frontend/src/initialization/mailbox-view.js':
+            if file.is_relative_to(app) and file.relative_to(app).as_posix() == 'frontend/src/initialization/mailbox-view.js':
                 value = value.replace('placeholder="name@163.com"', 'placeholder=""')
                 value = value.replace('placeholder="name@gmail.com"', 'placeholder=""')
             if any(re.search(pattern, value) for pattern in SECRET_PATTERNS):
@@ -219,10 +231,12 @@ def build(args):
         raise ValueError('Sensitive content detected; nothing zipped: ' + ', '.join(hits))
 
     commit = source_commit()
+    prefix = app.relative_to(root).as_posix() + '/'
     source_status = {role: {'commit': commit,
-                          'packaged_source_hashes': {key: value for key, value in copies.items() if key.startswith(role + '/')},
+                          'packaged_source_hashes': {key[len(prefix):]: value for key, value in copies.items()
+                                                     if key.startswith(prefix + role + '/')},
                           'working_copy_included': True} for role, path in sources.items()}
-    json_file(root / 'RELEASE.json', {'version': args.version,
+    json_file(app / 'RELEASE.json', {'version': version, 'platform': args.platform,
         'created_at': datetime.now(timezone.utc).isoformat(), 'sources': source_status,
         'third_party': {'ddgs': expected}, 'license': 'MIT', 'bundled_wheels': wheel_count,
         'bundled_runtimes': [{k: r[k] for k in ('name', 'version', 'sha256')} for r in runtimes],
@@ -232,16 +246,56 @@ def build(args):
         'excluded': ['secrets', 'OAuth app credentials', 'Gmail tokens', 'mail/attachments', 'databases',
                      'vectors', 'history', 'profile', 'initialization state', 'machine settings',
                      'test fixtures', 'node_modules', 'venvs', 'Git history', 'local OCR models']})
-    files = {str(p.relative_to(root)).replace('\\', '/'): sha(p) for p in sorted(root.rglob('*')) if p.is_file()}
-    json_file(root / 'MANIFEST.json', {'algorithm': 'sha256', 'files': files})
-    archive = out / ('GUILIU-' + args.version + '.zip')
+    # One manifest per scope: this version's program files, and the shared files beside versions/.
+    app_files = {p.relative_to(app).as_posix(): sha(p) for p in sorted(app.rglob('*')) if p.is_file()}
+    json_file(app / 'MANIFEST.json', {'algorithm': 'sha256', 'files': app_files})
+    # current.json is the launcher's version pointer and changes with every update, so it is not a release file.
+    shared = {p.relative_to(root).as_posix(): sha(p) for p in sorted(root.rglob('*'))
+              if p.is_file() and not p.relative_to(root).as_posix().startswith('versions/')
+              and p.relative_to(root).as_posix() != 'current.json'}
+    json_file(root / 'MANIFEST.json', {'algorithm': 'sha256', 'files': shared})
+    archive = out / ('GUILIU-' + label + '.zip')
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
         for file in sorted(root.rglob('*')):
             if file.is_file():
                 zipped.write(file, str(file.relative_to(out)))
-    (out / 'SHA256SUMS.txt').write_text(sha(archive) + '  ' + archive.name + '\n', encoding='ascii')
-    print(json.dumps({'folder': str(root), 'archive': str(archive), 'files': len(files) + 1,
-                      'bytes': archive.stat().st_size, 'sha256': sha(archive)}, indent=2))
+    # The update package: only this version's folder, for an installed release whose runtime matches.
+    update = out / ('GUILIU-' + label + '-app.zip')
+    with zipfile.ZipFile(update, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
+        for file in sorted(app.rglob('*')):
+            if file.is_file():
+                zipped.write(file, file.relative_to(app).as_posix())
+    published = [archive, update]
+    if args.signing_key:
+        published.append(signed_latest(out, root, version, args, update))
+    (out / 'SHA256SUMS.txt').write_text(''.join(sha(f) + '  ' + f.name + '\n' for f in published), encoding='ascii')
+    print(json.dumps({'folder': str(root), 'archive': str(archive), 'update_package': str(update),
+                      'latest': str(out / 'latest.json') if args.signing_key else None,
+                      'files': len(app_files) + len(shared) + 2, 'bytes': archive.stat().st_size, 'sha256': sha(archive)}, indent=2))
+
+
+def runtime_id(root):
+    """Must equal backend/updates.py Updater.runtime_id: an update applies only on the same runtime."""
+    digest = hashlib.sha256()
+    for name in ('RUNTIMES.json', 'requirements-offline.txt'):
+        path = root / name
+        digest.update(name.encode() + b'\0' + (path.read_bytes() if path.is_file() else b'') + b'\0')
+    return digest.hexdigest()
+
+
+def signed_latest(out, root, version, args, update):
+    """latest.json for the in-app update check, signed with the release key (kept outside every repository)."""
+    from cryptography.hazmat.primitives import serialization
+    key = serialization.load_pem_private_key(Path(args.signing_key).read_bytes(), password=None)
+    base = args.release_base_url.format(version=version).rstrip('/')
+    notes = Path(args.notes).read_text(encoding='utf-8').strip() if args.notes else ''
+    payload = {'version': version, 'platform': args.platform, 'published_at': datetime.now(timezone.utc).isoformat(),
+               'notes': notes, 'release_url': args.release_page.format(version=version), 'runtime': runtime_id(root),
+               'app': {'url': base + '/' + update.name, 'sha256': sha(update), 'size': update.stat().st_size}}
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    path = out / 'latest.json'
+    json_file(path, {'payload': payload, 'signature': base64.b64encode(key.sign(canonical)).decode()})
+    return path
 
 
 if __name__ == '__main__':
@@ -250,6 +304,11 @@ if __name__ == '__main__':
         parser.add_argument('--' + name, default=str(ROOT / name))
     parser.add_argument('--output', required=True)
     parser.add_argument('--version', default='0.1.0-rc.1')
+    parser.add_argument('--platform', default='win-x64')
+    parser.add_argument('--signing-key', help='Ed25519 private key (PEM) that signs latest.json; never in a repository')
+    parser.add_argument('--notes', help='Release notes text shown by the in-app update check')
+    parser.add_argument('--release-base-url', default='https://github.com/rhinoqvq/GuiLiu/releases/download/v{version}')
+    parser.add_argument('--release-page', default='https://github.com/rhinoqvq/GuiLiu/releases/tag/v{version}')
     parser.add_argument('--wheelhouse', help='Optional CPython 3.13 Windows x64 wheel directory')
     parser.add_argument('--dependency-sources', help='Optional upstream source archives and license notices')
     parser.add_argument('--runtime-downloads', help='Verified official Python/Node archives with RUNTIMES.json')

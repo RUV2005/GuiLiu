@@ -109,6 +109,54 @@ export class ApiClient {
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
   }
 
+  getUpdateStatus(refresh = false, backendPath = this.settings().backendPath) {
+    const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
+    return client.request(client.backendBase() + '/system/update' + (refresh ? '?refresh=true' : ''),
+      { cache: 'no-store', signal: AbortSignal.timeout(25000) });
+  }
+
+  startUpdate(version, backendPath = this.settings().backendPath) {
+    const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
+    return client.request(client.backendBase() + '/system/update', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version }), signal: AbortSignal.timeout(25000) });
+  }
+
+  restartForUpdate(backendPath = this.settings().backendPath) {
+    const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
+    return client.request(client.backendBase() + '/system/update/restart', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(15000) });
+  }
+
+  getSetupMailboxes(backendPath = this.settings().backendPath) {
+    const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
+    return client.request(client.backendBase() + '/initialization/mailboxes', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+  }
+
+  // Settings → Mailboxes: connect (or renew) one mailbox, confirm the banks a new one brought, and manage its job.
+  connectSetupMailbox(data, backendPath = this.settings().backendPath) {
+    return this.setupMailboxAction('/connect', data, backendPath, 60000);
+  }
+
+  confirmSetupMailbox(confirmations, backendPath = this.settings().backendPath) {
+    return this.setupMailboxAction('/confirm', { confirmations }, backendPath, 60000);
+  }
+
+  retrySetupMailbox(backendPath = this.settings().backendPath) { return this.setupMailboxAction('/retry', {}, backendPath); }
+  cancelSetupMailbox(backendPath = this.settings().backendPath) { return this.setupMailboxAction('/cancel', {}, backendPath, 45000); }
+  dismissSetupMailbox(backendPath = this.settings().backendPath) { return this.setupMailboxAction('/dismiss', {}, backendPath); }
+
+  setupMailboxAction(path, body, backendPath, timeout = 15000) {
+    const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
+    return client.request(client.backendBase() + '/initialization/mailboxes' + path, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeout) });
+  }
+
+  startFirstMailImport(backendPath = this.settings().backendPath) {
+    const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
+    return client.request(client.backendBase() + '/mail-imports/full/first', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(15000) });
+  }
+
   getRuntimeSettings(backendPath = this.settings().backendPath) {
     const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
     return client.request(client.backendBase() + '/settings/runtime', { signal: AbortSignal.timeout(15000) });

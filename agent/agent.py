@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from dashscope import MultiModalConversation
 from PIL import Image, ImageOps
 from tool import (
+    infer_memory_merchant_type,
     open_prompt,
     write_to_file,
     run_terminal_command,
@@ -847,31 +848,6 @@ def run_dealing_data_classification_agent(
 
     guarded_web_search.__name__ = "web_search"
     guarded_web_fetch.__name__ = "web_fetch"
-
-    def infer_memory_merchant_type(name, canonical_name, main_category, sub_category):
-        text = f"{name or ''} {canonical_name or ''}".lower()
-        platform_keys = [
-            "amazon", "rakuten", "yahoo", "qoo10", "mercari",
-            "uber", "ubereats", "uber eats", "apple", "google", "paypay",
-        ]
-        generic_keys = [
-            "seven-eleven", "7-eleven", "familymart", "lawson",
-            "super", "supermarket", "drug", "pharmacy", "matsumotokiyoshi",
-            "comodiiida", "comodi", "yaoko", "welcia", "sugi pharmacy", "drugseims",
-            "便利店", "超市", "药妆", "药局", "薬局",
-            "スーパー", "コンビニ", "ドラッグストア",
-        ]
-
-        if any(key in text for key in platform_keys):
-            return "platform", False
-
-        if any(key in text for key in generic_keys):
-            return "generic_store", False
-
-        if str(sub_category or "") in {"便利店", "食材", "药妆店", "日用品", "日用杂货"}:
-            return "generic_store", False
-
-        return "single_stable", True
 
     def auto_write_classification_memory(
         shop_name,

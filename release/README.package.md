@@ -60,6 +60,7 @@
 ## 你的数据留在你的电脑上
 
 - 归流在本机运行，只为你一个人服务。账本、向量库、对话记录、凭据和日志都保存在程序目录下的 `.runtime/` 中。
+- 新版本可以在设置的「版本与更新」中一键更新：更新包经过签名校验，切换前自动备份数据，新版本启动失败会自动回到原来的版本。
 - 三个服务只监听本机地址。浏览器需要与本机配对后才能访问；配对由启动器自动完成，你无需输入任何密码或配对码。
 - Gmail 支持 Google OAuth 或应用专用密码连接：OAuth 申请只读邮件权限；应用专用密码通过 SSL IMAP 获取邮件。163 同样通过 SSL IMAP 获取邮件。程序只执行读取操作，不发送或删除邮件。IMAP 凭据本身可能具有更广的邮箱权限，请妥善保管；凭据保存在当前副本中，请勿分享运行后的目录。
 - 需要调用外部服务的环节：邮件读取（Google 或网易）、信息提取与对话（通义千问 Qwen）、文本向量化（OpenAI），以及 Agent 的联网搜索。所需邮件和小票内容会发送给模型服务处理，调用可能产生费用。
@@ -85,7 +86,7 @@ Windows 离线依赖版可运行 `powershell -ExecutionPolicy Bypass -File .\ins
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe run.py serve --node "C:\实际安装路径\node.exe"
+.\.venv\Scripts\python.exe launch.py serve --node "C:\实际安装路径\node.exe"
 ```
 
 服务就绪后，浏览器会自动打开并完成配对。首次使用会进入初始化引导，按顺序完成七步即可开始使用：

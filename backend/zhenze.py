@@ -1,3 +1,4 @@
+import random
 import re
 from datetime import datetime, date
 import json
@@ -7,6 +8,7 @@ import unicodedata
 from email.utils import parseaddr
 from pathlib import Path
 import tempfile
+import time
 import regex as bounded_re
 from filelock import FileLock
 
@@ -17,7 +19,9 @@ zhenze_bank_patterns = {
   "prices_pattern": "利用金額[:：\\s]*([\\d,]+)\\s*円"
 }
 
-ZHENZE_JSON_DIR = os.path.join(os.path.dirname(__file__), "ZhenZeJson")
+# Bank rules are generated per user, so a release keeps them with the user data (run.py sets ABK_ZHENZE_DIR to
+# .runtime/data/bank-rules) and an update never replaces them; a source checkout keeps its own folder.
+ZHENZE_JSON_DIR = os.getenv("ABK_ZHENZE_DIR") or os.path.join(os.path.dirname(__file__), "ZhenZeJson")
 
 BANK_MAIL_TYPES = ("repayment", "credit", "debit")
 BANK_CAPTURE_FIELDS = {"time", "merchant", "amount", "currency", "status", "reference", "source_name", "due_date"}
@@ -74,7 +78,15 @@ def atomic_json(path, value):
             json.dump(value, target, ensure_ascii=False, indent=2)
             target.flush()
             os.fsync(target.fileno())
-        os.replace(name, path)
+        # On Windows a file another thread has open (a status poll) cannot be replaced until it is closed.
+        for attempt in range(40):
+            try:
+                os.replace(name, path)
+                break
+            except PermissionError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.002 + random.random() * 0.01 * (1 + attempt // 10))
     finally:
         if name and os.path.exists(name):
             os.unlink(name)

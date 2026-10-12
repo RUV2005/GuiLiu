@@ -1,5 +1,5 @@
 import { copy } from './copy.js';
-import { UI_STEPS, busyStatus, completed, canVisit, canSubmit, stepPayload, stepProgress, savedKeys } from './model.js';
+import { UI_STEPS, busyStatus, completed, canVisit, canSubmit, stepPayload, stepProgress, savedKeys, ALL_MAIL_RANGE } from './model.js';
 import { describeSetupError, serviceProblem, joinSentences } from './setup-errors.js';
 import { e, button, field } from './fields.js';
 import { mountBankReview } from './bank-review-view.js';
@@ -9,11 +9,14 @@ import { providerPickerMarkup, mountProviderPickers, updateProviderModels } from
 import { beginGmailAuthorization } from './gmail-authorization.js';
 import { vectorProgressMarkup, updateVectorProgress } from './vector-progress.js';
 import { MAIL_PROVIDERS, mailboxMarkup, syncMailbox, mailboxNames, mailReady, defaultMailPanel, defaultGmailMethod } from './mailbox-view.js';
+import { mailRangeMarkup, syncMailRange, lockedMailQuery } from './mail-range-view.js';
 
 export function mountInitializationView({ root, controller, language = 'zh', backendPath, local = true,
   onLanguage = () => {}, onBackend = () => {}, query = '', onQuery = () => {} }) {
   let current = controller.state, key = '', bankView;
   let disposed = false, gmailWindow, mailConnecting = '', mailPanel = '', gmailMethod = '';
+  // query holds only the custom search text; the date range is kept separately.
+  let mailRange = ALL_MAIL_RANGE;
   const bankDraft = {};
   const t = name => copy(language, name);
   let motion;
@@ -66,10 +69,12 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
     }
     if (step === 'ocr_source') body = `<p class="setup-lead">${e(t('ocrSourceNote'))}</p>${field(t('receiptSenderEmail'), 'email', current.ocrDraft, 'type="email" maxlength="254" autocomplete="email" spellcheck="false" required')}`;
     if (step === 'vector_db') {
-      // The same filter goes to every connected mailbox, so the hint describes the syntax they all accept.
-      const providers = current.status.mail?.providers || ['gmail'];
-      const hint = providers.includes('163') ? providers.includes('gmail') ? 'queryHintBoth' : 'queryHint163' : 'queryHint';
-      body = `<p class="setup-lead">${e(t('vectorNote'))}</p>${field(t('query'), 'query', query, 'maxlength="2000" autocomplete="off" spellcheck="false" placeholder="after:2026/01/01" aria-describedby="setup-query-hint"')}<p class="setup-note" id="setup-query-hint">${e(t(hint))}</p>`;
+      // The same filter goes to every connected mailbox, so the custom-search hint describes the syntax they all accept.
+      const providers = current.status.mail?.providers || ['gmail'], locked = lockedMailQuery(current.status);
+      // Last chance before the mailbox range is fixed: say so if 163 still exposes only its last 30 days.
+      const limited = locked === null && (current.status.mail?.accounts || []).find(a => a.provider === '163' && a.selected && a.recent_only);
+      const warning = limited ? `<div class="setup-mail-warning" role="status"><strong>${e(t('neteaseRecentTitle'))}</strong><p>${e(t('neteaseRecentVector').replace('{date}', limited.oldest_mail || ''))}</p></div>` : '';
+      body = `<p class="setup-lead">${e(t('vectorNote'))}</p>${warning}${mailRangeMarkup(t, language, { providers, locked, range: mailRange, custom: query.trim() })}`;
     }
     if (step === 'bank_rules') body = `<p class="setup-lead">${e(t('bankNote'))}</p><p class="setup-note">${e(t('bankNextNote'))}</p>`;
     if (step === 'complete') body = `<p class="setup-lead">${e(t('finishNote'))}</p><dl class="setup-summary">${UI_STEPS.slice(0, -1).map(s => `<div><dt>${e(t(s))}</dt><dd>${e(s === 'bank_rules' && !current.status.sources.length ? t('emptyBankConfirmed') : s === 'account_confirmation' ? t(current.reviewed ? 'reviewDone' : 'waiting') : t(completed(current.status, s) ? 'saved' : 'waiting'))}</dd></div>`).join('')}</dl><div data-setup-missing></div>`;
@@ -90,7 +95,9 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
       return;
     }
     const step = current.step || 'connection';
-    const changed = key !== step;
+    // The vector step swaps its controls for the saved filter once indexing starts.
+    const view = step === 'vector_db' && lockedMailQuery(current.status) !== null ? step + ':locked' : step;
+    const changed = key !== view;
     if (changed) {
       gmailWindow?.cancel(); gmailWindow = null;
       motion?.finish();
@@ -100,7 +107,7 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
       contentNode.dataset.setupContent = '';
       contentNode.innerHTML = content(step);
       root.querySelector('[data-setup-content]').replaceWith(contentNode);
-      key = step;
+      key = view;
       contentNode.classList.toggle('setup-content-wide', step === 'account_confirmation');
       if (step === 'account_confirmation') bankView = mountBankReview({ root: contentNode.querySelector('[data-setup-bank-review]'), controller, t, language: () => language, local, draft: bankDraft });
       root.querySelector('.setup-workspace').scrollTop = 0;
@@ -199,11 +206,16 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
       fields.gmail_method = event.submitter.dataset.mailMethod || 'oauth';
       fields.connected_providers = (current.status.mail?.accounts || []).filter(a => a.selected && a.authorized).map(a => a.provider);
     }
-    if (current.step === 'vector_db') fields.mail_providers = current.status.mail?.providers || ['gmail'];
+    if (current.step === 'vector_db') {
+      fields.mail_providers = current.status.mail?.providers || ['gmail'];
+      const locked = lockedMailQuery(current.status);
+      if (locked !== null) fields.locked_query = locked;
+    }
     if (current.step === 'api_keys') fields.saved_keys = savedKeys(current.status);
     try { data = current.step === 'ocr_source' && current.ocrPending ? current.ocrPending : stepPayload(current.step, fields, current.status.sources, current.accounts); }
     catch (error) { controller.error(error.message); return; }
-    if (current.step === 'vector_db') { query = data.query; onQuery(query); }
+    // Only the custom search text is remembered for this tab; a started import is locked by the Backend.
+    if (current.step === 'vector_db' && fields.locked_query === undefined) { query = String(fields.query ?? ''); onQuery(query); }
     const attempt = current.step === 'gmail' && data.connect_provider !== '163' && data.gmail_method !== 'imap' && data.providers?.includes('gmail') && !current.status.gmail?.authorized
       ? beginGmailAuthorization({ message: t('gmailOpening') }) : null;
     if (attempt) gmailWindow = attempt;
@@ -229,6 +241,10 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
     const item = event.target.closest('button');
     if (!item || item.disabled) return;
     if (item.dataset.mailTab) selectMailPanel(item.dataset.mailTab);
+    if (item.dataset.rangeStop) {
+      root.querySelector('[name="mail_range"]').value = item.dataset.rangeStop;
+      mailRange = syncMailRange(root, t, language) ?? mailRange;
+    }
     if (item.dataset.gmailMethod) { gmailMethod = item.dataset.gmailMethod; updateMailFields(); }
     if (item.dataset.setupStep) controller.select(item.dataset.setupStep);
     if (item.dataset.setupAction === 'next') controller.next();
@@ -260,6 +276,7 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
   function onInput(event) {
     if (current.step === 'ocr_source' && event.target.name === 'email') controller.editOcrEmail(event.target.value);
     if (current.step === 'gmail') updateMailFields();
+    if (current.step === 'vector_db') { mailRange = syncMailRange(root, t, language) ?? mailRange; if (event.target.name === 'query') query = event.target.value; }
   }
   // Each service shows its own connection result; a saved key may be left blank to test it again.
   function updateApiCheck() {

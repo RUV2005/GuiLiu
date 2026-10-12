@@ -7,7 +7,7 @@ import sys
 import zipfile
 
 
-def bundle_runtimes(downloads, root):
+def bundle_runtimes(downloads, root, app=None):
     downloads = Path(downloads).resolve()
     records = json.loads((downloads / 'RUNTIMES.json').read_text(encoding='utf-8'))
     if {r['name'] for r in records} != {'python', 'node'} or len(records) != 2:
@@ -57,9 +57,11 @@ def bundle_runtimes(downloads, root):
             path.unlink()
         scripts.rmdir()
     python = root / 'runtime/python/python.exe'
+    # Program files sit in versions/<version>/ (app); the embedded interpreter adds only the paths in its ._pth.
     subprocess.run([str(python), '-B', '-c',
-                    'import fastapi,uvicorn,sqlite3,psutil,lancedb,pyarrow,numpy,openai,PIL,primp,backend.system_control; '
+                    'import sys; sys.path.insert(0, "."); '
+                    'import fastapi,uvicorn,sqlite3,psutil,lancedb,pyarrow,numpy,openai,PIL,primp,cryptography,backend.system_control; '
                     'import importlib.metadata as m; print("Portable imports OK:", len(list(m.distributions())))'],
-                   check=True, cwd=root)
+                   check=True, cwd=app or root)
     (root / 'RUNTIMES.json').write_text(json.dumps(records, indent=2) + '\n', encoding='utf-8')
     return records

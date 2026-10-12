@@ -4,6 +4,7 @@ configure_utf8()
 
 from fastapi import FastAPI, Depends, HTTPException, Security,status,File,UploadFile,Form,Query, Header, Body
 from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from service_auth import ServiceAuthMiddleware
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -322,6 +323,27 @@ def agent_initialization_complete(request: Request):
     return {"success": True, "result": {"initialized": True}, "error": None}
 
 
+class SetupNotice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=160)
+    content: str = Field(min_length=1, max_length=4000)
+    key: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+@app.post("/agent/initialization/notice", dependencies=[Depends(require_local_setup)], tags=["initialization"])
+def agent_initialization_notice(notice: SetupNotice):
+    """A message in the information feed for the user, e.g. that a mailbox added in Settings awaits confirmation.
+    The same key is saved once, so a retried request does not repeat the message."""
+    from datetime import datetime, timedelta, timezone
+    from automation import InsightInput
+    store = app.state.automation_store
+    now = datetime.now(timezone.utc)
+    data = InsightInput(title=notice.title, content=notice.content, kind="analysis", topic_key="setup:" + notice.key,
+                        period_start=(now - timedelta(minutes=1)).isoformat(), period_end=now.isoformat(),
+                        evidence_ids=["setup:" + notice.key])
+    return {"success": True, "result": store.save_insight(data, {"source_calls": [{"tool": "setup_notice"}]}), "error": None}
+
+
 @app.post("/agent/initialization/discover", dependencies=[Depends(require_local_setup)], tags=["initialization"])
 def agent_initialization_discover(request: DiscoveryRequest):
     try:
@@ -518,7 +540,8 @@ async def OCR_request(
 
         prompt = open_prompt("ocr_extract", promptInput=promptInput)
 
-        result_text = OCR_qianwenVL(img_base64, prompt)
+        # The model call takes seconds; run it off the event loop so health checks and chat stay responsive.
+        result_text = await run_in_threadpool(OCR_qianwenVL, img_base64, prompt)
 
         return OCR_Response_structure(
             success=True,
@@ -667,7 +690,7 @@ def ocr_intent_request(req: OCRIntent_request_structure):
         )
 
 @app.post("/agent/mail-classification", response_model=MailClassification_Response_structure, status_code=status.HTTP_200_OK)
-async def mail_classification_request(req: MailClassification_request_structure):
+def mail_classification_request(req: MailClassification_request_structure):
     try:
         result = run_mail_classification_agent(
             msgid=req.msgid,
@@ -700,8 +723,10 @@ async def mail_classification_request(req: MailClassification_request_structure)
             error=str(e)
         )
 
+# Model, web-search and vector-store endpoints are plain functions: FastAPI runs them in its thread pool, so one
+# long classification (often tens of seconds) no longer blocks /agent/health, chat or other requests.
 @app.post("/agent/dealing-data/classify-write", response_model=DealingDataClassification_Response_structure, status_code=status.HTTP_200_OK)
-async def dealing_data_classification_request(req: DealingDataClassification_request_structure):
+def dealing_data_classification_request(req: DealingDataClassification_request_structure):
     try:
         result = run_dealing_data_classification_agent(
             msgid=req.msgid,
@@ -733,7 +758,7 @@ async def dealing_data_classification_request(req: DealingDataClassification_req
         )
 
 @app.post("/vectorDB/search", response_model=ClassificationMemorySearch_Response_structure, status_code=status.HTTP_200_OK)
-async def classification_memory_search_shop(req: ClassificationMemorySearch_request_structure):
+def classification_memory_search_shop(req: ClassificationMemorySearch_request_structure):
     try:
         result = search_classification_by_raw_shop_name(
             raw_shop_name=req.raw_shop_name,
@@ -763,7 +788,7 @@ async def classification_memory_search_shop(req: ClassificationMemorySearch_requ
 
 
 @app.put("/vectorDB/classification-case/sync-category", response_model=ClassificationMemorySearch_Response_structure, status_code=status.HTTP_200_OK)
-async def classification_case_sync_category(req: ClassificationCaseCategorySync_request_structure):
+def classification_case_sync_category(req: ClassificationCaseCategorySync_request_structure):
     try:
         case_store = classification_case_memory_store()
         merchant_store = merchant_memory_store()
@@ -978,7 +1003,7 @@ async def classification_case_sync_category(req: ClassificationCaseCategorySync_
 
 
 @app.post("/vectorDB/adr-memory", response_model=ClassificationMemorySearch_Response_structure, status_code=status.HTTP_200_OK)
-async def create_adr_memory(req: ADRMemoryCreate_request_structure):
+def create_adr_memory(req: ADRMemoryCreate_request_structure):
     try:
         result = create_adr_memory_api(
             source_type=req.source_type or "gmail",
@@ -1039,7 +1064,7 @@ def create_adr_memory_batch(req: ADRMemoryBatchCreate_request_structure):
 
 
 @app.get("/vectorDB/adr-memory/source", response_model=ClassificationMemorySearch_Response_structure)
-async def read_adr_memory_source(source_id: str = Query(min_length=1, max_length=1024)):
+def read_adr_memory_source(source_id: str = Query(min_length=1, max_length=1024)):
     try:
         row = get_adr_memory_by_source(source_id)
         return ClassificationMemorySearch_Response_structure(
@@ -1050,7 +1075,7 @@ async def read_adr_memory_source(source_id: str = Query(min_length=1, max_length
 
 
 @app.post("/vectorDB/adr-memory/search", response_model=ClassificationMemorySearch_Response_structure, status_code=status.HTTP_200_OK)
-async def search_adr_memory(req: ADRMemorySearch_request_structure):
+def search_adr_memory(req: ADRMemorySearch_request_structure):
     try:
         result = search_adr_memory_by_text(
             query_text=req.query_text,
@@ -1075,7 +1100,7 @@ async def search_adr_memory(req: ADRMemorySearch_request_structure):
 
 
 @app.post("/vectorDB/adr-memory/list", response_model=ClassificationMemorySearch_Response_structure, status_code=status.HTTP_200_OK)
-async def list_adr_memory(req: ADRMemoryList_request_structure):
+def list_adr_memory(req: ADRMemoryList_request_structure):
     try:
         result = list_adr_memory_by_source_type(
             source_type=req.source_type or "ocr",

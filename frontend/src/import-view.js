@@ -9,8 +9,8 @@ export const importText = (ctx, key, vars) => {
   const value = ctx.t(importFieldKey(key), vars);
   return value === importFieldKey(key) ? key : value;
 };
-const button = (action, label, disabled = false, primary = false) =>
-  `<button type="button" class="button${primary ? ' primary' : ''}" data-import-action="${a(action)}"${disabled ? ' disabled' : ''}>${h(label)}</button>`;
+const button = (action, label, disabled = false, primary = false, describedBy = '') =>
+  `<button type="button" class="button${primary ? ' primary' : ''}" data-import-action="${a(action)}"${disabled ? ' disabled' : ''}${describedBy ? ' aria-describedby="' + a(describedBy) + '"' : ''}>${h(label)}</button>`;
 const opts = (values, selected) => values.map(([value, label]) =>
   `<option value="${a(value)}"${String(value) === String(selected) ? ' selected' : ''}>${h(label)}</option>`).join('');
 const textValue = value => typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
@@ -22,6 +22,7 @@ function setup(ctx) {
   const s = ctx.state.importData, t = key => importText(ctx, key);
   if (s.job || s.resumeId) return '';
   const disabled = Boolean(s.busy || s.setupLoading), attr = disabled ? ' disabled' : '';
+  const needsAccount = Boolean(s.file && !s.form.account_number && s.setupLoaded && !s.setupError && !disabled);
   return `<div class="import-map-grid import-upload-form">
     <label>${h(t('source'))}<select data-import-form="preset_id"${attr}>${opts([['', t('auto')], ...s.presets.map(p => [p.preset_id, p.name || p.preset_id])], s.form.preset_id)}</select></label>
     <label>${h(t('account'))}<select data-import-form="account_number"${attr}>${opts([['', t('chooseAccount')]], s.form.account_number)}${accountOptions(ctx, s.form.account_number, s.accounts)}</select></label>
@@ -40,7 +41,16 @@ function setup(ctx) {
       <div class="import-file-copy"><h2>${h(s.file?.name || t('drop'))}</h2><p>${h(t('formats'))}</p></div>
       ${button('choose', t(s.file ? 'replace' : 'choose'), disabled)}
     </div>
-    <div class="import-upload-actions"><p class="import-privacy">${h(t('previewOnly'))}</p>${button('upload', t(s.busy || 'upload'), !s.file || !s.form.account_number || !s.setupLoaded || disabled, true)}</div>`;
+    <div class="import-upload-actions"><p class="import-privacy">${h(t('previewOnly'))}</p><div class="import-upload-submit">
+      <p id="import-account-hint" class="import-upload-hint" role="status"${needsAccount ? '' : ' hidden'}>${needsAccount ? h(t('chooseAccountFirst')) : ''}</p>
+      ${button('upload', t(s.busy || 'upload'), !s.file || !s.form.account_number || !s.setupLoaded || disabled, true, needsAccount ? 'import-account-hint' : '')}</div></div>`;
+}
+// Analysis reports merchant/product pairs classified so far; other processing states have no measurable progress.
+function progressBar(ctx, job) {
+  const p = job.state === 'analyzing' && job.progress?.total > 0 ? job.progress : null;
+  if (!p) return '<progress aria-label="' + a(importText(ctx, job.state)) + '"></progress>';
+  const label = importText(ctx, 'classifyingProgress', { done: p.done, total: p.total });
+  return `<div class="import-progress"><progress value="${a(p.done)}" max="${a(p.total)}" aria-label="${a(label)}"></progress><span>${h(label)}</span></div>`;
 }
 function stage(ctx) {
   const s = ctx.state.importData, t = key => importText(ctx, key), job = s.job;
@@ -48,7 +58,7 @@ function stage(ctx) {
   return `<div class="import-job">
     <div><h2>${h(job.filename)}</h2><p>#${h(job.account_number)} · ${h(job.import_id)} · ${h(t('revision'))} ${job.revision}</p></div>
     <div class="button-row"><span class="import-job-state" role="status">${h(t(job.state))}</span>${button('refresh', t('refresh'), Boolean(s.busy))}${button('choose', t('replace'), Boolean(s.busy || s.pendingCommit || s.editor))}</div>
-    ${processingImport(job.state) ? '<progress aria-label="' + a(t(job.state)) + '"></progress>' : ''}
+    ${processingImport(job.state) ? progressBar(ctx, job) : ''}
     </div>
     ${notice(ctx, job.error, true)}
     ${(job.warnings || []).map(item => notice(ctx, textValue(item))).join('')}`;
@@ -71,15 +81,17 @@ function mapping(ctx) {
 function summary(ctx) {
   const s = ctx.state.importData, t = key => importText(ctx, key);
   if (!s.job) return '';
+  const c = s.job.classification, sources = c && !processingImport(s.job.state) && c.memory + c.model + c.user + c.open > 0
+    ? `<p class="import-classified${c.open ? ' has-open' : ''}" role="status">${h(importText(ctx, 'classifiedSummary', c))}</p>` : '';
   return `<div class="import-metrics">${[['total',s.job.total],['selected',s.choices.size],['imported',s.job.counts?.imported || 0],['skipped',s.job.counts?.skipped || 0]].map(([key,value]) =>
-    `<div><span>${h(t(key))}</span><strong>${h(value)}</strong></div>`).join('')}</div>`;
+    `<div><span>${h(t(key))}</span><strong>${h(value)}</strong></div>`).join('')}</div>${sources}`;
 }
 function controls(ctx) {
   const s = ctx.state.importData, t = key => importText(ctx, key);
   if (!s.job || processingImport(s.job.state) || s.job.state === 'mapping_required') return '';
   const disabled = Boolean(s.editor || s.busy || s.pendingCommit);
   return `<div class="import-toolbar"><div class="import-tools">
-    <select data-import-filter aria-label="${a(t('status'))}"${disabled ? ' disabled' : ''}>${opts([['',t('all')],...IMPORT_STATUSES.map(value=>[value,t(value) + ' (' + (s.job.counts?.[value] || 0) + ')'])],s.filter)}</select>
+    <select data-import-filter aria-label="${a(t('status'))}"${disabled ? ' disabled' : ''}>${opts([['',t('all')],['unclassified',t('unclassified') + ' (' + (s.job.classification?.open || 0) + ')'],...IMPORT_STATUSES.map(value=>[value,t(value) + ' (' + (s.job.counts?.[value] || 0) + ')'])],s.filter)}</select>
     <input type="search" data-import-query value="${a(s.query)}" placeholder="${a(t('search'))}" aria-label="${a(t('search'))}"${disabled ? ' disabled' : ''}/></div>
     <div class="button-row">${button('select-new',t('selectNew'),locked(s))}${button('skip-visible',t('skipVisible'),locked(s))}${button('clear-selection',t('clearSelection'),locked(s) || !s.choices.size)}</div></div>`;
 }

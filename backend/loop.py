@@ -35,7 +35,7 @@ from adr_vector_memory_flow import (
 from runtime_settings import database_path, get_setting, server_data_path
 from bank_mail import BankMailProcessor, normalize_fields
 from zhenze import BankMailRules
-from initialization import bank_sources
+from initialization import bank_sources, runtime_allowed
 
 AGENT_base_url = get_setting("services.agent_url", "http://127.0.0.1:8000", "ABK_AGENT_BASE_URL").rstrip("/")
 LOOP_INTERVAL = float(get_setting("loop.interval_seconds", 60, "ABK_LOOP_INTERVAL_SECONDS"))
@@ -658,11 +658,15 @@ def run_all_workflows_loop(
     try:
         while not stop_event.is_set():
             try:
-                run_all_workflows_once(
-                    mail_configs, ocr_mail_query, vector_mail_query,
-                    vector_mail_max_results, adr_ocr_limit, stop_event=stop_event,
-                )
-                log.info("Daily mail loop round finished; next check in %s seconds", interval)
+                if not runtime_allowed():
+                    # Settings reopened setup to add or reconnect a mailbox; its steps read that mail themselves.
+                    log.info("Daily mail loop paused while setup is open; next check in %s seconds", interval)
+                else:
+                    run_all_workflows_once(
+                        mail_configs, ocr_mail_query, vector_mail_query,
+                        vector_mail_max_results, adr_ocr_limit, stop_event=stop_event,
+                    )
+                    log.info("Daily mail loop round finished; next check in %s seconds", interval)
             except Exception:
                 log.exception("Daily mail loop round failed; retry after interval")
             if stop_event.wait(interval):
@@ -700,7 +704,9 @@ def _run_selected_full_import(sources, mail_configs, ocr_mail_query, stop_event,
                     totals.update(get_bank_email_all(
                         config["mailaddress"], config["mail_name"], config["account_number"],
                         config.get("account_ref", ""), stop_event=stop_event, strict_errors=True,
-                        inbox_only=True, reserved_ids=reserved_ids,
+                        # Bank mail is matched by sender across all mail, like the daily sync, so history that
+                        # a mail filter archived or labelled out of the inbox is imported too.
+                        reserved_ids=reserved_ids,
                     ))
                 results[source] = dict(totals)
             else:
@@ -809,6 +815,59 @@ class FullMailImport:
                 self.process.terminate()
                 self.process.join(timeout=5)
             self._refresh()
+
+
+FIRST_IMPORT_SOURCES = ("bank_mail", "ocr_mail")
+FIRST_IMPORT_FAILURES = 3
+
+
+def settle_first_mail_import(initialization, task):
+    """Record what became of the first full import after setup, given the importer's current task.
+
+    Any finished import that covered bank mail and started after the import was asked for (record "since") completes
+    it, whether it started by itself or from Settings; an earlier run may predate a mailbox added since. The
+    automatic run itself, once finished, is marked failed (retried on a later visit, at most FIRST_IMPORT_FAILURES
+    times) or interrupted (resumed on the next visit, e.g. after the app was closed mid-way)."""
+    status = task.get("status")
+    with initialization.lock:
+        state = initialization.state()
+        record = dict(state.get("first_mail_import") or {})
+        if record.get("status") in (None, "done") or status in FullMailImport.ACTIVE or status == "idle":
+            return record or None
+        ours = record.get("status") == "running" and task.get("task_id") == record.get("task_id")
+        covers = "bank_mail" in task.get("sources", []) and str(task.get("created_at") or "") >= str(record.get("since") or "")
+        if status in {"completed", "completed_with_pending"} and (ours or covers):
+            record.update(status="done", task_id=task.get("task_id"), finished_at=task.get("finished_at"))
+        elif ours:
+            record.update(status="failed" if status == "failed" else "interrupted",
+                          failures=record.get("failures", 0) + (status == "failed"))
+        else:
+            return record
+        initialization.save_state({**state, "first_mail_import": record})
+        return record
+
+
+def start_first_mail_import(initialization, importer, mail_configs):
+    """Start the first full import after setup when the workspace is opened; return (started, record).
+
+    Setup completion marks it pending, so an installation set up before this existed never imports by itself. Once it
+    has finished this does nothing. A run cut short (the app closed, or an earlier Backend process) starts again, and
+    DoneList keeps processed mail from being posted twice. Several tabs opening at once start it only once."""
+    task = importer.status()
+    record = settle_first_mail_import(initialization, task)
+    if (not record or record.get("status") == "done" or task.get("status") in FullMailImport.ACTIVE
+            or record.get("failures", 0) >= FIRST_IMPORT_FAILURES):
+        return False, record
+    try:
+        started = importer.start(list(FIRST_IMPORT_SOURCES), mail_configs)
+    except Timeout:
+        return False, record   # another tab started it a moment ago
+    with initialization.lock:
+        state = initialization.state()
+        record = {**(state.get("first_mail_import") or {}), "status": "running",
+                  "task_id": started["task_id"], "started_at": started["created_at"]}
+        initialization.save_state({**state, "first_mail_import": record})
+    return True, record
 
 
 class LoopScheduler:

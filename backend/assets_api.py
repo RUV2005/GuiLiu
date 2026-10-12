@@ -22,7 +22,7 @@ class AccountCreate(AssetRequest):
     account_type: str = Field(default="bank", pattern="^(bank|cash|ewallet|credit|other)$")
     institution: str = Field(default="", max_length=100)
     currency: str = "JPY"
-    opening_balance: Decimal | None = None
+    opening_balance: Decimal | None = Field(default=None, description="Omitted or null creates a zero opening balance")
     credit_limit: Decimal | None = Field(default=None, ge=0)
     effective_at: str | None = None
 

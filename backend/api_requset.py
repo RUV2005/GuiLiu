@@ -63,6 +63,8 @@ def call_agent_ocr_api(base_url: str, promptInput: str, file_path: str):
         # 4. 如果传进来只有文件名，再自动去 attachments 下面找
         filename_only = os.path.basename(file_path) if file_path else ""
         if filename_only:
+            if os.getenv("ABK_ATTACHMENT_DIR"):
+                candidate_paths.append(os.path.join(os.environ["ABK_ATTACHMENT_DIR"], filename_only))
             candidate_paths.append(os.path.join(script_dir, "attachments", filename_only))
             candidate_paths.append(os.path.join(cwd, "attachments", filename_only))
 

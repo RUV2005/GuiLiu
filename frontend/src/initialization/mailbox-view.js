@@ -90,7 +90,7 @@ export function mailboxMarkup(t, status, panel, gmailMethod = defaultGmailMethod
       <h2>${e(t('neteasePanelTitle'))}</h2>
       <div class="setup-mailbox-163">
         <div class="setup-mailbox-steps"><h3>${e(t('neteaseStepsTitle'))}</h3>
-          <ol>${step('neteaseStepLogin', 'neteaseGuideLogin')}${step('neteaseStepEnable', 'neteaseGuideEnable')}${step('neteaseStepGenerate', 'neteaseGuideGenerate')}</ol>
+          <ol>${step('neteaseStepLogin', 'neteaseGuideLogin')}${step('neteaseStepEnable', 'neteaseGuideEnable')}${step('neteaseStepAllMail', 'neteaseGuideAllMail')}${step('neteaseStepGenerate', 'neteaseGuideGenerate')}</ol>
           <p class="setup-mailbox-links"><a href="https://mail.163.com/" target="_blank" rel="noopener noreferrer">${e(t('neteaseOpenWebmail'))} <span aria-hidden="true">↗</span></a>
             <a href="${NETEASE_HELP}" target="_blank" rel="noopener noreferrer">${e(t('neteaseOfficialHelp'))} <span aria-hidden="true">↗</span></a></p></div>
         <div class="setup-mailbox-form">
@@ -101,6 +101,7 @@ export function mailboxMarkup(t, status, panel, gmailMethod = defaultGmailMethod
           <p class="setup-note" data-mail-code-saved hidden>${e(t('neteaseCodeSaved'))}</p>
           <p class="setup-note">${e(t('mailScope'))}</p>
           <p class="setup-mailbox-account" data-mail-account="163" hidden></p>
+          <div class="setup-mail-warning" data-mail-recent role="status" hidden><strong>${e(t('neteaseRecentTitle'))}</strong><p data-mail-recent-body></p></div>
           <div class="setup-mailbox-actions"><button class="setup-button primary" type="submit" data-mail-connect="163">${e(t('neteaseConfirm'))}</button></div>
         </div>
       </div>
@@ -156,6 +157,10 @@ export function syncMailbox(root, t, { status, panel, connecting, blocked, gmail
   const reuse = Boolean(account?.authorized) && email.value.trim().toLowerCase() === (account?.email || '');
   root.querySelector('[name="netease_code"]').required = open && !reuse;
   root.querySelector('[data-mail-code-saved]').hidden = !reuse;
+  // Measured at verification: webmail still limits clients to the last 30 days until 收取全部邮件 is chosen.
+  const limited = mailReady(status, '163') && Boolean(account?.recent_only), warning = root.querySelector('[data-mail-recent]');
+  warning.hidden = !limited;
+  warning.querySelector('[data-mail-recent-body]').textContent = limited ? t('neteaseRecentBody').replace('{date}', account.oldest_mail || '') : '';
   const anyReady = MAIL_PROVIDERS.some(provider => mailReady(status, provider));
   root.querySelector('[data-mail-note]').textContent = t(anyReady ? 'mailSelectNoteReady' : 'mailSelectNote');
 }

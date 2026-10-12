@@ -1,6 +1,7 @@
 import { ApiClient } from "./api.js";
 import { createRuntimeSettingsController } from './runtime-settings-controller.js';
-import { createGmailSettingsController } from './gmail-settings-controller.js';
+import { createMailboxSettingsController, watchMailboxJob } from './mailbox-settings.js';
+import { createUpdateController, dailyUpdateNotice } from './update-settings.js';
 import { createUserProfileController } from './user-profile.js';
 import { createFullMailImportController } from './full-mail-import-controller.js';
 import { createSystemShutdownController } from './system-shutdown.js';
@@ -226,7 +227,11 @@ const systemShutdown = createSystemShutdownController({ state, api, context: cur
   } });
 const runtimeSettings = createRuntimeSettingsController({ state, api, context: currentContext,
   source: () => normalizeServiceBase(state.settings.backendPath, DEFAULT_SETTINGS.backendPath) });
-const gmailSettings = createGmailSettingsController({ state, context: currentContext,
+// Outside Settings, a mailbox being added still reports when it needs the user.
+const mailboxWatch = watchMailboxJob({ api, notify, language: () => state.settings.language, start: false });
+const mailboxSettings = createMailboxSettingsController({ state, api, context: currentContext, onJobStarted: () => mailboxWatch.check(),
+  source: () => normalizeServiceBase(state.settings.backendPath, DEFAULT_SETTINGS.backendPath) });
+const updateSettings = createUpdateController({ state, api, context: currentContext,
   source: () => normalizeServiceBase(state.settings.backendPath, DEFAULT_SETTINGS.backendPath) });
 const fullMailImport = createFullMailImportController({ state, api, context: currentContext,
   source: () => normalizeServiceBase(state.settings.backendPath, DEFAULT_SETTINGS.backendPath),
@@ -498,7 +503,8 @@ function renderApp({ animateAgentCharts = false } = {}) {
   disposeInterfaceMotion();
   agentChat.switchService();
   runtimeSettings.activate();
-  gmailSettings.activate();
+  mailboxSettings.activate();
+  updateSettings.activate();
   userProfile.activate();
   fullMailImport.activate();
   document.documentElement.lang = state.settings.language === "ja" ? "ja" : state.settings.language === "en" ? "en" : "zh-CN";
@@ -512,7 +518,8 @@ function renderApp({ animateAgentCharts = false } = {}) {
   agentInformation.mount();
   plansController.mount();
   runtimeSettings.mount();
-  gmailSettings.mount();
+  mailboxSettings.mount();
+  updateSettings.mount();
   userProfile.mount();
   fullMailImport.mount();
   systemShutdown.patch();
@@ -589,7 +596,8 @@ function renderMain(options = {}) {
     runtimeSettings.mount();
     marketPanel.mount();
   }
-  gmailSettings.mount();
+  mailboxSettings.mount();
+  updateSettings.mount();
   userProfile.mount();
   fullMailImport.mount();
   systemShutdown.patch();
@@ -874,6 +882,41 @@ async function initialize() {
   await Promise.allSettled([assetController.loadSettings(), refreshEverything()]);
   state.initialized = true;
   refreshExchangeRates();
+  void startFirstMailImport();
+  void remindAboutUpdates();
+  void remindAboutMailbox();
+}
+
+// A mailbox being added in Settings may be waiting for the user's confirmation.
+async function remindAboutMailbox() {
+  try {
+    await mailboxWatch.check();
+  } catch (error) {
+    console.warn('Mailbox check failed:', error);
+  }
+}
+
+// Once a day, mention a newer release; a failed check never affects startup.
+async function remindAboutUpdates() {
+  try {
+    await dailyUpdateNotice({ api, notify, message: version => tx('updateAvailable', { version }) });
+  } catch (error) {
+    console.warn('Update check failed:', error);
+  }
+}
+
+// The first visit after setup imports the whole mailbox once. The Backend decides, so reloads and other tabs never
+// start it twice, and an import cut short by closing the app resumes on the next visit. While setup is still indexing
+// the rest of the mailbox the Backend asks to wait, and this page asks again every minute.
+const FIRST_MAIL_IMPORT_RETRY_MS = 60000;
+async function startFirstMailImport() {
+  try {
+    const payload = await api.startFirstMailImport();
+    if (payload?.result?.started) notify(tx('firstMailImportStarted'));
+    else if (payload?.result?.waiting) window.setTimeout(() => void startFirstMailImport(), FIRST_MAIL_IMPORT_RETRY_MS);
+  } catch (error) {
+    console.warn('First mail import check failed:', error);
+  }
 }
 
 async function loadServiceAddresses() {
@@ -1157,7 +1200,8 @@ function setLanguage(language) {
     patchOverviewChart(ctx, shell);
     patchOverviewAssets(ctx, shell);
     runtimeSettings.patch();
-    gmailSettings.mount();
+    mailboxSettings.mount();
+    updateSettings.mount();
     userProfile.mount();
     fullMailImport.mount();
     systemShutdown.patch();
@@ -2441,7 +2485,8 @@ window.addEventListener("hashchange", async () => {
   }
   state.route = nextRoute;
   if ((state.route === "dev-prompts" || state.route === "dev-system") && !state.settings.developerMode) state.route = "settings";
-  if (state.route !== 'settings') gmailSettings.leave();
+  if (state.route !== 'settings') mailboxSettings.leave();
+  if (state.route !== 'settings') updateSettings.leave();
   if (state.route !== 'settings') fullMailImport.leave();
   if (state.route !== 'settings') systemShutdown.leave();
   state.globalSearch = "";
@@ -2463,8 +2508,8 @@ window.addEventListener("beforeunload", saveState);
 window.addEventListener('focus', () => void userProfile.refresh());
 window.addEventListener('pagehide', () => userProfile.stop());
 window.addEventListener('pageshow', () => void userProfile.refresh());
-window.addEventListener('pagehide', () => gmailSettings.leave());
-window.addEventListener('pageshow', event => { if (event.persisted) gmailSettings.mount(); });
+window.addEventListener('pagehide', () => { mailboxSettings.leave(); updateSettings.leave(); });
+window.addEventListener('pageshow', event => { if (event.persisted) { mailboxSettings.mount(); updateSettings.mount(); } });
 window.addEventListener('pagehide', () => fullMailImport.leave());
 window.addEventListener('pagehide', () => systemShutdown.leave());
 window.addEventListener('pageshow', event => { if (event.persisted) fullMailImport.mount(); });

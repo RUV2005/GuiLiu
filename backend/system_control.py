@@ -182,7 +182,9 @@ class ShutdownController:
         control = os.getenv("GUILIU_CONTROL_DIR")
         if control:
             folder = Path(control).resolve()
-            if folder != self.root.parent / ".runtime":
+            # A release keeps each version in versions/<version>/; its data sits beside them (GUILIU_HOME).
+            home = Path(os.getenv("GUILIU_HOME") or self.root.parent).resolve()
+            if folder != home / ".runtime":
                 raise ValueError("Supervisor directory does not belong to this installation")
             state = json.loads((folder / "processes.json").read_text(encoding="utf-8"))
             token = os.getenv("GUILIU_CONTROL_TOKEN")

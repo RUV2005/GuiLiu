@@ -3362,10 +3362,10 @@ button.category-tag:hover:not(.is-editing) {
 .settings-page .financial-color-setting .setting-switch { border: 0; padding-bottom: 10px; }
 .settings-page .financial-color-preview { gap: 18px; font-size: 12px; }
 
-.gmail-settings-summary { margin: 0; }
-.gmail-settings-summary > div {
+.mailbox-settings-summary { margin: 0; }
+.mailbox-settings-summary > div {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px) auto;
   align-items: center;
   gap: 8px 32px;
   min-height: 64px;
@@ -3373,18 +3373,20 @@ button.category-tag:hover:not(.is-editing) {
   border-bottom: 1px solid var(--line);
   font: 400 14px/1.5 var(--font-ui);
 }
-.gmail-settings-summary dt { color: var(--ink-soft); font-weight: 500; }
-.gmail-settings-summary dd { min-width: 0; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
-.gmail-settings-status { display: inline-block; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; }
-.gmail-settings-note, .gmail-settings-missing { color: var(--muted); font: 400 12px/1.7 var(--font-ui); }
-.gmail-settings-note { margin: 12px 0 0; }
-.gmail-settings-missing { margin-top: 10px; }
-.gmail-settings-missing summary { width: fit-content; cursor: pointer; color: var(--ink-soft); }
-.gmail-settings-missing ul { margin: 8px 0 0; padding-left: 20px; }
-.gmail-settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 16px; }
-.gmail-settings-feedback { min-height: 1.7em; margin: 12px 0 0; color: var(--ink); font: 400 13px/1.7 var(--font-ui); overflow-wrap: anywhere; }
-.gmail-settings-feedback[role="alert"] { color: var(--danger); }
-.gmail-settings-link { display: inline-block; margin-top: 8px; color: var(--ink); text-underline-offset: 3px; font-size: 13px; }
+.mailbox-settings-summary dt { color: var(--ink-soft); font-weight: 500; }
+.mailbox-settings-summary dd { min-width: 0; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.mailbox-settings-summary dd small { display: block; color: var(--muted); font-size: 12px; }
+.mailbox-settings-status { display: inline-block; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 12px; }
+.mailbox-settings-status[data-state="expired"] { border-color: var(--danger); color: var(--danger); }
+.mailbox-settings-note { margin: 12px 0 0; color: var(--muted); font: 400 12px/1.7 var(--font-ui); }
+.mailbox-settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 16px; }
+.mailbox-settings-feedback { min-height: 1.7em; margin: 12px 0 0; color: var(--ink); font: 400 13px/1.7 var(--font-ui); overflow-wrap: anywhere; }
+.mailbox-settings-feedback[role="alert"] { color: var(--danger); }
+.update-progress { width: 100%; max-width: 420px; height: 6px; margin-top: 8px; accent-color: var(--accent); }
+.update-notes { margin-top: 10px; font: 400 13px/1.7 var(--font-ui); }
+.update-notes summary { width: fit-content; cursor: pointer; color: var(--ink-soft); }
+.update-notes p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.update-summary > div { grid-template-columns: minmax(0, 1fr) minmax(0, 300px); }
 .mail-full-note { margin: 10px 0 0; color: var(--muted); font: 400 12px/1.7 var(--font-ui); overflow-wrap: anywhere; }
 .mail-full-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
 .mail-full-confirm { margin-top: 20px; padding: 18px 0; border-block: 1px solid var(--line-strong); font: 400 14px/1.7 var(--font-ui); }
@@ -3406,12 +3408,27 @@ button.category-tag:hover:not(.is-editing) {
 .settings-exit-feedback { margin: 12px 0 0; color: var(--danger); font: 400 13px/1.7 var(--font-ui); }
 .settings-exit-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100% - 48px); padding: 28px; overflow: auto; background: var(--surface-1); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
 .settings-exit-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+/* Settings → Mailboxes: the connection window and the bank confirmation window. */
+.mailbox-dialog { width: min(720px, calc(100% - 32px)); max-height: calc(100% - 48px); padding: 24px 28px; overflow: auto; background: var(--surface-1); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
+.mailbox-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.mailbox-dialog [hidden] { display: none !important; }
+.mailbox-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+.mailbox-dialog-header h2 { margin: 0; font: 600 20px/1.5 var(--font-ui); }
+.mailbox-dialog .setup-mailbox-panel { margin-top: 12px; }
+.mailbox-source { margin: 16px 0 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.mailbox-source legend { padding: 0 6px; font: 400 14px/1.6 var(--font-ui); overflow-wrap: anywhere; }
+.mailbox-choices { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 10px; font: 400 14px/1.6 var(--font-ui); }
+.mailbox-choice { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.mailbox-source-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 16px; margin-top: 12px; }
+.mailbox-source-fields label { display: grid; gap: 4px; color: var(--ink-soft); font: 400 12px/1.6 var(--font-ui); min-width: 0; }
+.mailbox-source-fields :is(input, select) { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-0, transparent); color: var(--ink); font: 400 14px/1.4 var(--font-ui); }
+.mailbox-job { margin-top: 14px; }
 .settings-exit-dialog h2 { margin: 0 0 16px; font: 600 22px/1.5 var(--font-ui); }
 .settings-exit-dialog p { margin: 12px 0; font: 400 14px/1.8 var(--font-ui); overflow-wrap: anywhere; }
 .settings-exit-dialog .settings-exit-note { color: var(--muted); font-size: 12px; }
 .settings-exit-dialog footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
 @container settings (max-width: 540px) {
-  .gmail-settings-summary > div { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .mailbox-settings-summary > div { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
 
 .settings-connection-check {

@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath '.venv/Scripts/python.exe')) {
 }
 $LocalPython = Join-Path $PSScriptRoot '.venv/Scripts/python.exe'
 if (Test-Path -LiteralPath 'MANIFEST.json') {
-    & $LocalPython -B run.py verify
+    & $LocalPython -B launch.py verify
     if ($LASTEXITCODE -ne 0) { throw "Release integrity check failed." }
 }
 if (Test-Path -LiteralPath 'requirements-offline.txt') {

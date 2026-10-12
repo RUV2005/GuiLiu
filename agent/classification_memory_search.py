@@ -21,6 +21,7 @@ def search_classification_by_raw_shop_name(
     item_name: str | None = None,
     item_type: str | None = None,
     case_max_distance: float = DEFAULT_CASE_MAX_DISTANCE,
+    embedding_client=None,
 ) -> dict[str, Any]:
     """
     Two-step vector lookup:
@@ -30,7 +31,8 @@ def search_classification_by_raw_shop_name(
 
     The second step always uses semantic vector search under the matched
     merchant. If item_name/item_type is empty, it uses the matched shop name
-    as the query text.
+    as the query text. A caller searching many items can pass an
+    embedding_client that already holds their vectors.
     """
     query_text = str(raw_shop_name or "").strip()
     if not query_text:
@@ -40,7 +42,7 @@ def search_classification_by_raw_shop_name(
     max_distance = float(max_distance)
     case_max_distance = float(case_max_distance)
 
-    embedding_client = get_embedding_client()
+    embedding_client = embedding_client or get_embedding_client()
     merchant = _find_merchant(
         query_text=query_text,
         embedding_client=embedding_client,

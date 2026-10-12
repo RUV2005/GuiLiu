@@ -324,7 +324,8 @@ def create_account(conn, data, operation_id):
     effective = timestamp(data.get("effective_at") or utc_now())
     if effective > utc_now():
         raise AssetError("Opening balance cannot take effect in the future")
-    balance = minor_amount(data["opening_balance"], code) if data.get("opening_balance") is not None else None
+    # 仅新建账户将未填写余额视为 0，并写入基准；不修改旧账户的未知余额。
+    balance = minor_amount(data["opening_balance"] if data.get("opening_balance") is not None else 0, code)
     limit = minor_amount(data["credit_limit"], code) if data.get("credit_limit") is not None else None
     balance = _account_policy(data["account_type"], code, limit).opening_balance(balance)
     account_number = allocate_account_number(conn, code, data.get("account_number"))

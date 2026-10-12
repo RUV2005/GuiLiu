@@ -22,6 +22,7 @@ GUILIU takes care of day-to-day entry, categorization and duplicate checks; you 
 ## Your data stays on your computer
 
 - All three services listen only on the local address. The ledger, vector database, chat history, credentials and logs are stored in `.runtime/` inside the program folder. A browser must be paired with this computer before it can connect; the launcher pairs it automatically.
+- The Windows version updates itself from Version and updates in Settings: the update is signature-checked, your data is backed up before the switch, and the previous version comes back automatically if the new one does not start.
 - Mail is only read: nothing is sent, deleted or marked as read. Gmail connects through Google sign-in (read-only access) or an app password (SSL IMAP); 163 Mail uses an IMAP authorization code.
 - Steps that use external services: reading mail (Google / NetEase), information extraction and chat (Qwen), text embeddings (OpenAI), the Agent's web search, and exchange rates and market prices (ExchangeRate-API, Frankfurter, Yahoo Finance, gold-api.com). The relevant email and receipt content is sent to the model services you configure, and those providers bill you for usage.
 - GUILIU is meant for one person on one computer. Do not expose its services to your local network or the internet.

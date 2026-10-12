@@ -13,6 +13,8 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parent
+# In a release this file sits in versions/<version>/; the data folder and shared files are two levels up.
+HOME = ROOT.parents[1] if ROOT.parent.name == 'versions' else ROOT
 
 
 def main():
@@ -20,7 +22,7 @@ def main():
     parser.add_argument('--frontend-port', type=int, default=5178)
     parser.add_argument('--reuse-account', type=int)
     args = parser.parse_args()
-    processes = json.loads((ROOT / '.runtime/processes.json').read_text(encoding='utf-8'))
+    processes = json.loads((HOME / '.runtime/processes.json').read_text(encoding='utf-8'))
     assert processes['smoke_test'] is True, 'Writes only allowed in a smoke-test deployment'
     assert processes['ports']['frontend'] == args.frontend_port
     base = f'http://127.0.0.1:{args.frontend_port}'
@@ -47,7 +49,7 @@ def main():
 
     request('/healthz')
     request('/backend/DB/accounts', code=401)
-    log = (ROOT / '.runtime/logs/frontend.out.log').read_text(encoding='utf-8')
+    log = (HOME / '.runtime/logs/frontend.out.log').read_text(encoding='utf-8')
     codes = re.findall(r'GUILIU pairing code \(one use, 30 minutes\): ([a-f0-9]{32})', log)
     assert codes, 'Start the release first to obtain a pairing code'
     pair = Request(base + '/auth/pair', data=urlencode({'code': codes[-1]}).encode(),
@@ -104,30 +106,30 @@ def main():
                 headers={'Idempotency-Key': str(uuid4())})
     account = request(f'/backend/DB/accounts/{number}')['result']
     assert str(account['balance']) in {'1200', '1200.0', '1200.00'}
-    with sqlite3.connect(ROOT / '.runtime/data/backend.sqlite3') as db:
+    with sqlite3.connect(HOME / '.runtime/data/backend.sqlite3') as db:
         assert db.execute('SELECT COUNT(*) FROM DealingData').fetchone()[0] == 0
         assert db.execute('SELECT COUNT(*) FROM DoneList').fetchone()[0] == 0
         assert db.execute('SELECT COUNT(*) FROM OCRresults').fetchone()[0] == 0
-    assert not (ROOT / '.runtime/data/gmail-token.json').exists()
-    assert not (ROOT / '.runtime/data/agent/credentials.json').exists()
+    assert not (HOME / '.runtime/data/gmail-token.json').exists()
+    assert not (HOME / '.runtime/data/agent/credentials.json').exists()
     prepared = request('/agent/initialization/prepare', 'POST')['result']
     assert set(prepared['vector_tables']) == {'merchant_memory', 'classification_case_memory', 'adr_memory'}
     import lancedb
-    vectors = lancedb.connect(str(ROOT / '.runtime/data/vectors'))
+    vectors = lancedb.connect(str(HOME / '.runtime/data/vectors'))
     for name in prepared['vector_tables']:
         assert vectors.open_table(name).count_rows() == 0
     assert request('/backend/initialization')['result']['initialized'] is False
     # Packaged copies carry MANIFEST.json; a source checkout has nothing to compare against.
     packaged = (ROOT / 'MANIFEST.json').is_file()
-    if packaged:
-        manifest = json.loads((ROOT / 'MANIFEST.json').read_text(encoding='utf-8'))
+    for base in dict.fromkeys((ROOT, HOME)) if packaged else ():
+        manifest = json.loads((base / 'MANIFEST.json').read_text(encoding='utf-8'))
         for name, digest in manifest['files'].items():
-            assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
+            assert hashlib.sha256((base / name).read_bytes()).hexdigest() == digest, name
     report = {'passed': True, 'checked_at': datetime.now(timezone.utc).isoformat(), 'checks': results,
               'test_account': number, 'restarted_persistence_test': bool(args.reuse_account),
               'release_files_unchanged': True if packaged else None, 'initialized': False,
               'not_tested': ['browser visual interaction', 'live OAuth', 'LLM', 'Embedding', 'OCR', 'mail processing']}
-    output = ROOT.parent / ('smoke-restart.json' if args.reuse_account else 'smoke-first-start.json')
+    output = HOME.parent / ('smoke-restart.json' if args.reuse_account else 'smoke-first-start.json')
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'checks': len(results), 'test_account': number, 'report': str(output)}))
 

@@ -13,8 +13,36 @@ import secrets
 import webbrowser
 from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_opener, urlopen
 
+# A release keeps each version's program files in versions/<version>/ (this file's folder) beside the shared
+# runtime/ and the user data in .runtime/, so an update swaps program files without touching data. A source checkout
+# runs from its own folder. launch.py names the release folder in GUILIU_HOME.
 ROOT = Path(__file__).resolve().parent
-RUNTIME = ROOT / '.runtime'
+HOME = Path(os.environ['GUILIU_HOME']).resolve() if os.environ.get('GUILIU_HOME') else (
+    ROOT.parents[1] if ROOT.parent.name == 'versions' else ROOT)
+RUNTIME = HOME / '.runtime'
+# The embedded interpreter's ._pth fixes sys.path and does not add the script folder.
+sys.path.insert(0, str(ROOT))
+UPDATE_EXIT = 75   # services stopped for an update; launch.py switches versions and starts again
+
+
+def release_version():
+    try:
+        return json.loads((ROOT / 'RELEASE.json').read_text(encoding='utf-8'))['version']
+    except (OSError, ValueError, KeyError):
+        return 'source'
+
+
+def migrate_user_files(data):
+    """Copy bank rules and mail attachments that older layouts kept inside backend/ into the data folder, once."""
+    for legacy, target in (('backend/ZhenZeJson', data / 'bank-rules'), ('backend/attachments', data / 'mail/attachments')):
+        for base in dict.fromkeys((ROOT, HOME)):
+            folder = base / legacy
+            if not folder.is_dir():
+                continue
+            for item in folder.iterdir():
+                if item.is_file() and not (target / item.name).exists():
+                    target.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, target / item.name)
 
 
 def write_json(path, data):
@@ -29,8 +57,9 @@ def environment(args):
            if not k.upper().startswith(blocked)
            and k.upper() not in {'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'BACKEND_URL', 'AGENT_URL', 'PORT', 'HOST'}}
     data = RUNTIME / 'data'
-    for folder in (data / 'initialization', data / 'agent', data / 'context', RUNTIME / 'logs'):
+    for folder in (data / 'initialization', data / 'agent', data / 'context', data / 'bank-rules', RUNTIME / 'logs'):
         folder.mkdir(parents=True, exist_ok=True)
+    migrate_user_files(data)
     settings = RUNTIME / 'settings.json'
     if not settings.exists():
         shutil.copyfile(ROOT / 'backend/config/settings.json', settings)
@@ -45,6 +74,9 @@ def environment(args):
         'ABK_INITIALIZATION_DIR': str(data / 'initialization'),
         'ABK_AGENT_CREDENTIALS_FILE': str(data / 'agent/credentials.json'),
         'ABK_GMAIL_TOKEN_FILE': str(data / 'gmail-token.json'),
+        'ABK_ZHENZE_DIR': str(data / 'bank-rules'),
+        'ABK_ATTACHMENT_DIR': str(data / 'mail/attachments'),
+        'GUILIU_HOME': str(HOME), 'GUILIU_APP_DIR': str(ROOT), 'GUILIU_VERSION': release_version(),
         'ABK_BACKEND_BASE_URL': f'http://127.0.0.1:{args.backend_port}',
         'ABK_AGENT_BASE_URL': f'http://127.0.0.1:{args.agent_port}',
         'BACKEND_URL': f'http://127.0.0.1:{args.backend_port}',
@@ -53,6 +85,9 @@ def environment(args):
         # Avoid discovering a parent .env when deployed under a development directory.
         'PYTHON_DOTENV_DISABLED': '1',
     })
+    # Tests and mirrors may point the update check elsewhere; it is still signature-checked.
+    if os.environ.get('GUILIU_UPDATE_URL'):
+        env['GUILIU_UPDATE_URL'] = os.environ['GUILIU_UPDATE_URL']
     if args.smoke_test:
         env.update(ABK_LOOP_ENABLED='false', ABK_ADR_ENABLED='false', ABK_ADR_MAIL_ENABLED='false',
                    ABK_AUTOMATION_ENABLED='false', ABK_FX_OFFLINE='1', GUILIU_SMOKE_TEST='1')
@@ -60,12 +95,18 @@ def environment(args):
 
 
 def verify():
-    manifest = json.loads((ROOT / 'MANIFEST.json').read_text(encoding='utf-8'))
-    bad = [name for name, digest in manifest['files'].items()
-           if not (ROOT / name).is_file() or hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest]
-    if bad:
-        raise RuntimeError('Release files changed or missing: ' + ', '.join(bad))
-    print(f"Verified {len(manifest['files'])} release files", flush=True)
+    # This version's program files, then (in a release) the shared files beside versions/.
+    total = 0
+    for base in dict.fromkeys((ROOT, HOME)):
+        if base != ROOT and not (base / 'MANIFEST.json').is_file():
+            continue
+        manifest = json.loads((base / 'MANIFEST.json').read_text(encoding='utf-8'))
+        bad = [name for name, digest in manifest['files'].items()
+               if not (base / name).is_file() or hashlib.sha256((base / name).read_bytes()).hexdigest() != digest]
+        if bad:
+            raise RuntimeError('Release files changed or missing: ' + ', '.join(bad))
+        total += len(manifest['files'])
+    print(f"Verified {total} release files", flush=True)
 
 
 def open_paired_browser(frontend_port, auth_file):
@@ -201,8 +242,8 @@ def serve(args):
     env.update(GUILIU_CONTROL_DIR=str(RUNTIME), GUILIU_CONTROL_TOKEN=control_token)
     from backend.system_control import identity, stop_services
     import psutil
-    stop = RUNTIME / 'stop-request'
-    stop.unlink(missing_ok=True)
+    stop, restart = RUNTIME / 'stop-request', RUNTIME / 'restart-request'
+    stop.unlink(missing_ok=True); restart.unlink(missing_ok=True); (RUNTIME / 'ready.json').unlink(missing_ok=True)
     processes, logs = [], []
     commands = [
         ('agent', [sys.executable, '-B', '-m', 'uvicorn', 'agent_api:app', '--app-dir', str(ROOT / 'agent'), '--host', '127.0.0.1', '--port', str(args.agent_port), '--no-access-log']),
@@ -240,6 +281,8 @@ def serve(args):
                     pass
             if not pending:
                 write_json(ports_file(), {'frontend': args.frontend_port, 'backend': args.backend_port, 'agent': args.agent_port})
+                # launch.py keeps a new version only once it has reached this point.
+                write_json(RUNTIME / 'ready.json', {'version': release_version(), 'supervisor': os.getpid()})
                 print(f'All services ready: http://127.0.0.1:{args.frontend_port}', flush=True)
                 lines = (RUNTIME / 'logs/frontend.out.log').read_text(encoding='utf-8').splitlines()
                 code = next((line for line in reversed(lines) if line.startswith('GUILIU pairing code')), '')
@@ -275,6 +318,11 @@ def serve(args):
             stream.close()
         (RUNTIME / 'processes.json').unlink(missing_ok=True)
         stop.unlink(missing_ok=True)
+    # The Backend asks for a restart (after preparing an update) with this run's control token.
+    if stop_requested(restart, control_token):
+        restart.unlink(missing_ok=True)
+        return UPDATE_EXIT
+    return 0
 
 
 def stop_requested(path, token):
@@ -287,7 +335,7 @@ def stop_requested(path, token):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['serve', 'verify', 'stop'])
-    bundled_node = ROOT / 'runtime/node/node.exe'
+    bundled_node = HOME / 'runtime/node/node.exe'
     parser.add_argument('--node', default=str(bundled_node) if bundled_node.is_file() else 'node')
     # Leave these out to pick free ports automatically (defaults 3000 / 8001 / 8000 when available).
     parser.add_argument('--frontend-port', type=int)
@@ -305,7 +353,7 @@ def main():
         write_json(RUNTIME / 'stop-request', {'token': state['control_token']})
         print('Stop requested for this deployment only')
     else:
-        serve(args)
+        sys.exit(serve(args) or 0)
 
 
 if __name__ == '__main__':

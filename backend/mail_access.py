@@ -1,5 +1,6 @@
 """Gmail-compatible mail access: the Gmail API or Gmail IMAP with an app password, plus read-only NetEase 163 IMAP."""
 
+import base64
 import hashlib
 import imaplib
 import json
@@ -10,6 +11,7 @@ import shlex
 import ssl
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from datetime import timedelta
 from email import policy
@@ -24,7 +26,8 @@ from zhenze import atomic_json
 
 log = logging.getLogger("uvicorn.error.mail_access")
 _gmail_lock = threading.RLock()
-ID_PATTERN = re.compile(r"n163_([0-9a-f]{24})_inbox_(\d+)_(\d+)")
+# The folder part is "inbox" or "f" plus a hash of the folder's IMAP name, so INBOX IDs keep their original form.
+ID_PATTERN = re.compile(r"n163_([0-9a-f]{24})_(inbox|f[0-9a-f]{8})_(\d+)_(\d+)")
 GMAIL_ID_PATTERN = re.compile(r"gimap_([0-9a-f]{24})_(\d+)_(\d+)")
 MAX_MAIL_BYTES = 50 * 1024 * 1024
 
@@ -69,7 +72,9 @@ def mailbox_status():
     accounts = [{"provider": "gmail", "method": "imap" if imap else "oauth", **({"email": gmail.get("email")} if imap else {}),
                  "authorized": bool(gmail.get("app_password")) if imap else gmail_authorized(), "selected": "gmail" in selected},
                 {"provider": "163", "email": netease.get("email"),
-                 "authorized": bool(netease.get("authorization_code")), "selected": "163" in selected}]
+                 "authorized": bool(netease.get("authorization_code")), "selected": "163" in selected,
+                 # Measured when the account was last verified (see NetEaseMail.inbox_reach).
+                 "recent_only": bool(netease.get("recent_only")), "oldest_mail": netease.get("oldest_mail")}]
     return {"providers": selected, "accounts": accounts,
             "authorized": bool(selected) and all(a["authorized"] for a in accounts if a["selected"])}
 
@@ -90,6 +95,17 @@ def save_mail_config(data):
         os.chmod(path, 0o600)
 
 
+def _imap_utf7(name):
+    """Decode an IMAP modified UTF-7 mailbox name (RFC 3501 5.1.3), e.g. NetEase's Chinese folder names."""
+    def decode(match):
+        chunk = match.group(1).replace(",", "/")
+        return base64.b64decode(chunk + "=" * (-len(chunk) % 4)).decode("utf-16-be") if chunk else "&"
+    try:
+        return re.sub(r"&([A-Za-z0-9+,]*)-", decode, name)
+    except (ValueError, UnicodeDecodeError):
+        return name
+
+
 def _atomic_bytes(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = None
@@ -105,43 +121,65 @@ def _atomic_bytes(path, content):
             temp.unlink(missing_ok=True)
 
 
-class NetEaseMail:
-    """INBOX only. UIDVALIDITY and account identity are part of every source ID."""
-    HOST = "imap.163.com"
-    SECRET = "authorization_code"
-    PATTERN = ID_PATTERN
-    MAIL_FIELDS = {"labelIds": ["INBOX"], "source_type": "mail", "provider": "163"}
-    # Fixed strings: the setup page translates them, so they never carry mail content or credentials.
-    ERRORS = {
-        "connect": "163 connection failed; check IMAP, authorization code and network",
-        "mailbox": "163 INBOX is unavailable",
-        "validity": "163 did not return UIDVALIDITY",
-        "changed": "163 UIDVALIDITY changed; mailbox needs manual reconciliation",
-        "foreign": "Mail ID does not belong to this 163 account",
-        "search": "163 mail search failed",
-        "reread": "163 UIDVALIDITY changed; refusing to read a different message",
-        "size": "163 mail is missing or exceeds the 50 MiB limit",
-        "incomplete": "163 returned incomplete mail; nothing was cached",
-    }
+class ImapMail:
+    """Read-only IMAP shared by NetEase 163 and Gmail with an app password: connecting, listing, reading mail and
+    images. A subclass says which mailboxes hold the user's mail, how its source IDs look and how a mail query
+    becomes a server search, so one provider's quirks never reach the other."""
+    HOST = SECRET = PATTERN = None
+    MAIL_FIELDS = {}
+    ERRORS = {}
+    FIRST_MAILBOX = "inbox"   # the mailbox opened at connection time
 
     def __init__(self, account, query=""):
         self.account, self.query = account, str(query or "")
         self.key = account_key(account["email"])
         self.connection = None
         self.validity = None
-
-    def _open(self, connection):
-        # NetEase requires client identification before opening a mailbox.
-        status, _ = connection.xatom("ID", '("name" "GUILIU" "version" "1.0" "vendor" "GUILIU")')
-        if status != "OK":
-            raise MailAccessError("163 rejected client identification")
-        return connection.select("INBOX", readonly=True)[0]
+        self.validities, self.selected = {}, None
 
     def _login_error(self, error):
         return self.ERRORS["connect"]
 
-    def _source_id(self, uid):
-        return f"n163_{self.key}_inbox_{self.validity}_{uid}"
+    # Provider specifics.
+    def _open(self, connection):
+        raise NotImplementedError
+
+    def _mailboxes(self, connection):
+        raise NotImplementedError
+
+    def _select(self, slug):
+        raise NotImplementedError
+
+    def _labels(self, slug):
+        raise NotImplementedError
+
+    def _parts(self, msgid):
+        raise NotImplementedError
+
+    def _source_id(self, uid, slug):
+        raise NotImplementedError
+
+    def _query_parts(self, query):
+        """(server search, local filters) for a mail query; local filters exist only where the server cannot search."""
+        raise NotImplementedError
+
+    def _local_filter(self, connection, slug, uids, filters, whole_folder):
+        raise NotImplementedError
+
+    def get_all_msgid(self, *, stop_event=None, label_ids=None, **kwargs):
+        raise NotImplementedError
+
+    @staticmethod
+    def _arrivals(connection, uids):
+        """INTERNALDATE (arrival time) per UID in the open folder, to order mail from several folders newest first."""
+        status, rows = connection.uid("FETCH", "1:*", "(INTERNALDATE)")
+        arrivals = {}
+        for row in rows if status == "OK" and rows else []:
+            uid = re.search(rb"UID (\d+)", row) if isinstance(row, bytes) else None
+            stamp = imaplib.Internaldate2tuple(row) if uid else None
+            if stamp and int(uid[1]) in uids:
+                arrivals[int(uid[1])] = time.mktime(stamp)
+        return arrivals
 
     def connect(self):
         if self.connection is not None:
@@ -162,6 +200,7 @@ class NetEaseMail:
             if self.account.get("uidvalidity") and self.account["uidvalidity"] != validity:
                 raise MailAccessError(self.ERRORS["changed"])
             self.connection, self.validity = connection, validity
+            self.validities, self.selected = {self.FIRST_MAILBOX: validity}, self.FIRST_MAILBOX
             return connection
         except Exception as error:
             if connection is not None:
@@ -175,59 +214,46 @@ class NetEaseMail:
 
     def close(self):
         connection, self.connection = self.connection, None
+        self.selected = None
         if connection is not None:
             try:
                 connection.logout()
             except Exception:
                 pass
 
-    def _parts(self, msgid):
-        match = self.PATTERN.fullmatch(str(msgid))
-        if not match or match[1] != self.key:
-            raise MailAccessError(self.ERRORS["foreign"])
-        return match[2], match[3]
-
     def _ids(self, query=None, stop_event=None):
         if stop_event is not None and stop_event.is_set():
             raise InterruptedError("Mail read stopped")
-        terms = self._search_terms(self.query if query is None else query)
+        terms, filters = self._query_parts(self.query if query is None else query)
         connection = self.connect()
         connection._encoding = "utf-8"
-        status, result = self._search(connection, terms)
-        if status != "OK":
-            raise MailAccessError(self.ERRORS["search"])
-        uids = sorted({int(uid) for uid in (result[0] or b"").split()}, reverse=True)
-        return [self._source_id(uid) for uid in uids]
+        mailboxes = self._mailboxes(connection)
+        found = []
+        for slug, _ in mailboxes:
+            if stop_event is not None and stop_event.is_set():
+                raise InterruptedError("Mail read stopped")
+            try:
+                self._select(slug)
+            except MailAccessError:
+                if slug == self.FIRST_MAILBOX:
+                    raise
+                # One unreadable extra folder must not hide the rest of the mailbox.
+                log.warning("Skipping a mail folder that could not be opened: %s", slug)
+                continue
+            status, result = self._search(connection, terms)
+            if status != "OK":
+                raise MailAccessError(self.ERRORS["search"])
+            uids = {int(uid) for uid in (result[0] or b"").split()}
+            if filters and uids:
+                uids, arrivals = self._local_filter(connection, slug, uids, filters, whole_folder=not terms)
+            else:
+                arrivals = self._arrivals(connection, uids) if len(mailboxes) > 1 and uids else {}
+            found += [(arrivals.get(uid, 0), uid, self._source_id(uid, slug)) for uid in uids]
+        # Within one folder UIDs grow with arrival; across folders the arrival time orders mail newest first.
+        return [msgid for _, _, msgid in sorted(found, reverse=True)]
 
     def _search(self, connection, terms):
         return connection.uid("SEARCH", "CHARSET", "UTF-8", *(terms or ["ALL"]))
-
-    def _search_terms(self, query):
-        terms = []
-        for token in shlex.split(query):
-            if token.lower() == "in:inbox":
-                continue
-            key, colon, value = token.partition(":")
-            if not colon:
-                key, value = ("from", token) if "@" in token else ("text", token)
-            key = key.lower()
-            mapping = {"from": "FROM", "to": "TO", "subject": "SUBJECT", "text": "TEXT",
-                       "after": "SINCE", "before": "BEFORE"}
-            if key not in mapping or not value or any(c in value for c in "\r\n\x00"):
-                raise MailAccessError("163 supports from/to/subject/text/after/before and in:inbox queries")
-            if key in {"after", "before"}:
-                date = gmailM("")._parse_datetime(value.replace("/", "-"))
-                if date is None:
-                    raise MailAccessError("Invalid mail query date")
-                months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-                value = f"{date.day:02d}-{months[date.month - 1]}-{date.year}"
-            terms.extend([mapping[key], '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'])
-        return terms
-
-    def get_all_msgid(self, *, stop_event=None, label_ids=None, **kwargs):
-        if label_ids and list(label_ids) != ["INBOX"]:
-            raise MailAccessError("163 currently supports INBOX only")
-        return self._ids(stop_event=stop_event)
 
     def get_unprocessed_mail_ids(self, eligible, max_results=10, *, scan_limit=None):
         if max_results <= 0 or (scan_limit is not None and scan_limit <= 0):
@@ -244,14 +270,14 @@ class NetEaseMail:
         return result
 
     def _message(self, msgid):
-        validity, uid = self._parts(msgid)
+        slug, validity, uid = self._parts(msgid)
         path = server_data_path("mail/cache/" + str(msgid) + ".eml")
         with gmailM.image_lock("mail:" + str(msgid)):
             if path.is_file():
                 raw = path.read_bytes()
             else:
                 connection = self.connect()
-                if validity != self.validity:
+                if validity != self._select(slug):
                     raise MailAccessError(self.ERRORS["reread"])
                 status, size_data = connection.uid("FETCH", uid, "(RFC822.SIZE)")
                 size = re.search(rb"RFC822\.SIZE (\d+)", b" ".join(v for v in size_data if isinstance(v, bytes)))
@@ -259,7 +285,11 @@ class NetEaseMail:
                     raise MailAccessError(self.ERRORS["size"])
                 status, chunks = connection.uid("FETCH", uid, "(BODY.PEEK[])")
                 literals = [v[1] for v in chunks if isinstance(v, tuple)]
-                if status != "OK" or len(literals) != 1 or len(literals[0]) != int(size[1]):
+                # imaplib reads exactly the literal length the server announces and fails on a short read, so the
+                # literal itself proves the message is whole. RFC822.SIZE only guards the size limit: NetEase can
+                # report a few bytes more than the message it returns.
+                if (status != "OK" or len(literals) != 1 or not literals[0]
+                        or len(literals[0]) > MAX_MAIL_BYTES):
                     raise MailAccessError(self.ERRORS["incomplete"])
                 raw = literals[0]
                 _atomic_bytes(path, raw)
@@ -293,7 +323,7 @@ class NetEaseMail:
                 "from": str(message.get("From", "")), "to": str(message.get("To", "")),
                 "date": str(message.get("Date", "")), "body_text": "\n\n".join(text),
                 "body_html": "\n\n".join(html), "snippet": "\n".join(text)[:200], **self.MAIL_FIELDS,
-                "rfc_message_id": str(message.get("Message-ID", ""))}
+                "labelIds": self._labels(self._parts(msgid)[0]), "rfc_message_id": str(message.get("Message-ID", ""))}
 
     def get_mail_data_batch(self, ids, *, on_mail=None, stop_event=None, **kwargs):
         result = {}
@@ -358,13 +388,231 @@ class NetEaseMail:
         return sorted(result, key=lambda row: -row["score"])[:max_results]
 
 
-class GmailImap(NetEaseMail):
+class NetEaseMail(ImapMail):
+    """Reads every folder that holds the user's mail: INBOX, subscriptions and the user's own folders. Drafts, sent,
+    deleted, spam, virus and advertising folders are skipped. Folder, UIDVALIDITY and account are in every source ID."""
+    HOST = "imap.163.com"
+    SECRET = "authorization_code"
+    PATTERN = ID_PATTERN
+    MAIL_FIELDS = {"labelIds": ["INBOX"], "source_type": "mail", "provider": "163"}
+    # NetEase flags drafts, sent, trash and spam with special-use attributes; its virus and advertising folders have
+    # no attribute, so their fixed names identify them. Virtual All/Flagged views would only repeat other folders.
+    SKIP_FLAGS = frozenset({"\\drafts", "\\sent", "\\trash", "\\junk", "\\noselect", "\\all", "\\flagged"})
+    SKIP_NAMES = frozenset({"草稿箱", "已发送", "已删除", "垃圾邮件", "病毒文件夹", "广告邮件"})
+    # Fixed strings: the setup page translates them, so they never carry mail content or credentials.
+    ERRORS = {
+        "connect": "163 connection failed; check IMAP, authorization code and network",
+        "mailbox": "163 INBOX is unavailable",
+        "validity": "163 did not return UIDVALIDITY",
+        "changed": "163 UIDVALIDITY changed; mailbox needs manual reconciliation",
+        "foreign": "Mail ID does not belong to this 163 account",
+        "search": "163 mail search failed",
+        "reread": "163 UIDVALIDITY changed; refusing to read a different message",
+        "size": "163 mail is missing or exceeds the 50 MiB limit",
+        "incomplete": "163 returned incomplete mail; nothing was cached",
+        "folder": "163 folder is unavailable",
+    }
+
+    def __init__(self, account, query=""):
+        super().__init__(account, query)
+        self.folders = None
+
+    def _open(self, connection):
+        # NetEase requires client identification before opening a mailbox.
+        status, _ = connection.xatom("ID", '("name" "GUILIU" "version" "1.0" "vendor" "GUILIU")')
+        if status != "OK":
+            raise MailAccessError("163 rejected client identification")
+        return connection.select("INBOX", readonly=True)[0]
+
+    def _source_id(self, uid, slug="inbox"):
+        return f"n163_{self.key}_{slug}_{self.validities[slug]}_{uid}"
+
+    def _mailboxes(self, connection):
+        """(folder ID, IMAP name) pairs to read: INBOX first, then the user's other mail folders in listing order."""
+        if self.folders is None:
+            folders = {"inbox": "INBOX"}
+            status, rows = connection.list()
+            for row in rows if status == "OK" and rows else []:
+                match = re.match(r'\((?P<flags>[^)]*)\) (?:"[^"]*"|NIL) (?P<name>.+)$',
+                                 row.decode("utf-8", "replace") if isinstance(row, bytes) else "")
+                if not match:
+                    continue
+                name = match["name"]
+                plain = _imap_utf7(name[1:-1].replace('\\"', '"').replace("\\\\", "\\") if name.startswith('"') else name)
+                flags = {flag.lower() for flag in match["flags"].split()}
+                if plain.upper() != "INBOX" and not flags & self.SKIP_FLAGS and plain not in self.SKIP_NAMES:
+                    folders["f" + hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]] = name
+            self.folders = folders
+        return list(self.folders.items())
+
+    def _select(self, slug):
+        """Open a folder read-only and return its UIDVALIDITY."""
+        connection = self.connect()
+        if slug == self.selected:
+            return self.validities[slug]
+        mailbox = dict(self._mailboxes(connection)).get(slug)
+        if mailbox is None:
+            raise MailAccessError(self.ERRORS["folder"])
+        status = connection.select(mailbox, readonly=True)[0]
+        values = connection.response("UIDVALIDITY")[1]
+        validity = values[0].decode("ascii") if values and values[0] else ""
+        if status != "OK" or not validity.isdigit():
+            raise MailAccessError(self.ERRORS["folder"])
+        self.validities[slug], self.selected = validity, slug
+        return validity
+
+    def _labels(self, slug):
+        # Like Gmail, only mail that sits in the inbox carries the INBOX label.
+        return ["INBOX"] if slug == "inbox" else []
+
+    # NetEase shows clients only the last 30 days unless webmail is set to 收取全部邮件; the oldest INBOX mail then
+    # arrived at most about that long ago.
+    RECENT_ONLY_DAYS = 31
+
+    def inbox_reach(self):
+        """(arrival date of the oldest INBOX mail as YYYY-MM-DD, or None when empty; whether only recent mail shows)."""
+        connection = self.connect()
+        self._select("inbox")
+        status, rows = connection.fetch("1", "(INTERNALDATE)")
+        stamp = next((imaplib.Internaldate2tuple(row) for row in rows or [] if isinstance(row, bytes) and b"INTERNALDATE" in row),
+                     None) if status == "OK" else None
+        if not stamp:
+            return None, False
+        oldest = time.mktime(stamp)
+        return time.strftime("%Y-%m-%d", time.localtime(oldest)), time.time() - oldest <= self.RECENT_ONLY_DAYS * 86400
+
+    def close(self):
+        super().close()
+        self.folders = None
+
+    def _parts(self, msgid):
+        """(folder ID, UIDVALIDITY, UID) of a source ID that belongs to this account."""
+        match = self.PATTERN.fullmatch(str(msgid))
+        if not match or match[1] != self.key:
+            raise MailAccessError(self.ERRORS["foreign"])
+        return match[2], match[3], match[4]
+
+    # NetEase's IMAP SEARCH honours date and flag keys only: FROM, TO, SUBJECT, TEXT, BODY and HEADER searches answer
+    # OK with no mail at all, even for an exact sender address. Dates therefore go to the server, while address,
+    # subject and keyword filters are matched here against the From, To and Subject headers. Keywords match those
+    # headers only, not the body.
+    LOCAL_KEYS = ("from", "to", "subject", "text")
+    HEADER_BATCH = 500
+
+    def _query_parts(self, query):
+        """(server SEARCH terms, local (field, casefolded value) filters) for one from/to/subject/text/after/before query."""
+        terms, filters = [], []
+        for token in shlex.split(query):
+            if token.lower() == "in:inbox":
+                continue
+            key, colon, value = token.partition(":")
+            if not colon:
+                key, value = ("from", token) if "@" in token else ("text", token)
+            key = key.lower()
+            if key not in self.LOCAL_KEYS + ("after", "before") or not value or any(c in value for c in "\r\n\x00"):
+                raise MailAccessError("163 supports from/to/subject/text/after/before and in:inbox queries")
+            if key in self.LOCAL_KEYS:
+                filters.append((key, value.casefold()))
+                continue
+            date = gmailM("")._parse_datetime(value.replace("/", "-"))
+            if date is None:
+                raise MailAccessError("Invalid mail query date")
+            months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+            terms.extend(["SINCE" if key == "after" else "BEFORE", f'"{date.day:02d}-{months[date.month - 1]}-{date.year}"'])
+        return terms, filters
+
+    def _local_filter(self, connection, slug, uids, filters, whole_folder):
+        """(matching UIDs, their arrival times) of the open folder, from the cached headers."""
+        headers = self._headers(connection, slug, uids, pruned=whole_folder)
+        matched = {uid for uid in uids if uid in headers and self._matches(headers[uid], filters)}
+        return matched, {uid: headers[uid][0] for uid in matched}
+
+    @staticmethod
+    def _matches(header, filters):
+        _, sender, recipient, subject = header
+        fields = {"from": sender, "to": recipient, "subject": subject}
+        return all((value in fields[key]) if key in fields else any(value in text for text in fields.values())
+                   for key, value in filters)
+
+    def _headers(self, connection, slug, uids, pruned=False):
+        """{uid: (arrival time, from, to, subject)} for UIDs of the open folder, text casefolded.
+
+        A UID's headers never change while the folder keeps its UIDVALIDITY, so they are cached per account and folder,
+        and later searches read only mail that arrived since. pruned=True means uids is the whole folder, so cached
+        entries for deleted mail are dropped."""
+        path = server_data_path("mail/cache/n163_" + self.key + "_headers.json")
+        name = slug + "_" + self.validities[slug]
+        try:
+            known = json.loads(path.read_text(encoding="utf-8")).get(name, {}) if path.is_file() else {}
+        except (OSError, ValueError):
+            known = {}
+        missing = sorted(uid for uid in uids if str(uid) not in known)
+        if missing:
+            log.info("Reading 163 mail headers for local filtering: folder=%s new=%d", slug, len(missing))
+        fetched = {}
+        for start in range(0, len(missing), self.HEADER_BATCH):
+            chunk = missing[start:start + self.HEADER_BATCH]
+            status, rows = connection.uid("FETCH", ",".join(map(str, chunk)),
+                                          "(INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT)])")
+            if status != "OK":
+                raise MailAccessError(self.ERRORS["search"])
+            rows = list(rows or [])
+            for index, row in enumerate(rows):
+                if not isinstance(row, tuple):
+                    continue
+                # A server may put UID or INTERNALDATE after the header literal, in the next response piece.
+                tail = rows[index + 1] if index + 1 < len(rows) and isinstance(rows[index + 1], bytes) else b""
+                meta = row[0] + b" " + tail
+                uid = re.search(rb"UID (\d+)", meta)
+                if not uid or int(uid[1]) not in uids:
+                    continue
+                stamp = imaplib.Internaldate2tuple(meta)
+                fetched[uid[1].decode()] = [time.mktime(stamp) if stamp else 0, *self._header_text(row[1])]
+        if fetched or (pruned and len(known) > len(uids)):
+            with FileLock(str(path) + ".lock", timeout=30):
+                try:
+                    cache = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+                except (OSError, ValueError):
+                    cache = {}
+                # Another reader may have saved meanwhile; keep its entries and drop this folder's older UIDVALIDITY.
+                current = {**cache.get(name, {}), **fetched}
+                if pruned:
+                    current = {key: value for key, value in current.items() if int(key) in uids}
+                cache = {key: value for key, value in cache.items() if not key.startswith(slug + "_")}
+                cache[name] = current
+                path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_json(path, cache)
+            known = current
+        return {int(key): tuple(value) for key, value in known.items() if int(key) in uids}
+
+    @staticmethod
+    def _header_text(raw):
+        """Decoded, casefolded From, To and Subject of a header block; an undecodable header falls back to raw text."""
+        message = BytesParser(policy=policy.default).parsebytes(raw or b"", headersonly=True)
+        values = []
+        for field in ("From", "To", "Subject"):
+            try:
+                value = str(message.get(field) or "")
+            except Exception:
+                value = (raw or b"").decode("utf-8", "replace")
+            values.append(" ".join(value.split()).casefold())
+        return values
+
+    def get_all_msgid(self, *, stop_event=None, label_ids=None, **kwargs):
+        # 163 has folders, not labels: the INBOX scope (used by the full import) covers every folder of the user's mail.
+        if label_ids and list(label_ids) != ["INBOX"]:
+            raise MailAccessError("163 currently supports INBOX only")
+        return self._ids(stop_event=stop_event)
+
+
+class GmailImap(ImapMail):
     """Gmail over IMAP with an app password, for deployments without their own Google OAuth app.
 
     Reads All Mail (not just INBOX), so archived notices count exactly as they do through the Gmail API, and searches
     with Gmail's own syntax (X-GM-RAW), so one mail filter means the same thing for either connection method.
     """
     HOST = "imap.gmail.com"
+    FIRST_MAILBOX = "all"
     SECRET = "app_password"
     PATTERN = GMAIL_ID_PATTERN
     MAIL_FIELDS = {"labelIds": [], "source_type": "gmail", "provider": "gmail"}
@@ -402,13 +650,30 @@ class GmailImap(NetEaseMail):
         rejected = any(word in text for word in ("AUTHENTICATIONFAILED", "Invalid credentials", "Application-specific password"))
         return self.ERRORS["login" if rejected else "connect"]
 
-    def _source_id(self, uid):
+    # Gmail keeps every labelled mail in All Mail, so one mailbox (opened at connection time) holds everything.
+    def _mailboxes(self, connection):
+        return [("all", self.mailbox)]
+
+    def _select(self, slug):
+        self.connect()
+        return self.validity
+
+    def _labels(self, slug):
+        return list(self.MAIL_FIELDS["labelIds"])
+
+    def _parts(self, msgid):
+        match = self.PATTERN.fullmatch(str(msgid))
+        if not match or match[1] != self.key:
+            raise MailAccessError(self.ERRORS["foreign"])
+        return "all", match[2], match[3]
+
+    def _source_id(self, uid, slug="all"):
         return f"gimap_{self.key}_{self.validity}_{uid}"
 
-    def _search_terms(self, query):
-        # Gmail search takes 2026/01/01; dashed dates come from search_related_mail.
+    def _query_parts(self, query):
+        # Gmail search takes 2026/01/01; dashed dates come from search_related_mail. Gmail searches every key itself.
         query = " ".join(str(query or "").split())
-        return re.sub(r"\b(after|before):(\d{4})-(\d{1,2})-(\d{1,2})\b", r"\1:\2/\3/\4", query)
+        return re.sub(r"\b(after|before):(\d{4})-(\d{1,2})-(\d{1,2})\b", r"\1:\2/\3/\4", query), []
 
     def _search(self, connection, query):
         if not query:

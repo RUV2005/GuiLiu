@@ -575,7 +575,8 @@ class gmailM:
             ).execute()
             _payload = msg.get("payload", {})
         if not os.path.isabs(attachment_dir):
-            attachment_dir = str(Path(__file__).resolve().parent / attachment_dir)
+            # Downloaded attachments are user data: a release keeps them in .runtime/data (ABK_ATTACHMENT_DIR).
+            attachment_dir = os.getenv("ABK_ATTACHMENT_DIR") or str(Path(__file__).resolve().parent / attachment_dir)
         images = []
         legacy_paths = []
 
