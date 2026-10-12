@@ -45,8 +45,8 @@ Mail sync, detail enrichment and automated tasks are on by default and start onl
 | `frontend/` | Plain HTML / CSS / JavaScript interface and a Node.js local server (static files, local pairing, same-origin proxy). No build step and no `npm install` |
 | `backend/` | Python / FastAPI: mail access (Gmail API, IMAP), the daily processing loop, rule extraction, statement import, ledger and asset calculations, the setup flow; SQLite storage |
 | `agent/` | Python / FastAPI: LLM calls (Qwen), embeddings (OpenAI) and the LanceDB vector store, tool execution, receipt recognition, categorization, detail enrichment, plans and automated tasks |
-| Root | Unified launcher `run.py` (starts all three services, picks free ports, pairs the browser, stops everything together), smoke test `smoke.py`, Windows start / stop / install scripts, dependency lists `requirements.txt` and `constraints.txt`, deployment guide `DEPLOYMENT.md` |
-| `release/` | Portable build scripts `build.py` and `portable.py`, runtime list `RUNTIMES.json`, in-package guide `README.package.md` |
+| Root | Unified launcher `run.py` (starts all three services, picks free ports, pairs the browser, stops everything together), smoke test `smoke.py`, dependency lists `requirements.txt` and `constraints.txt`, deployment guide `DEPLOYMENT.md` |
+| `release/` | Portable build scripts `build.py` and `portable.py`, runtime list `RUNTIMES.json`, in-package guide `README.package.md`; `release/windows/` holds the Windows start / stop / install scripts, which the build places at the package root |
 
 The three services authenticate each other with their own credentials; the browser never receives long-lived keys.
 

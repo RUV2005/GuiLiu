@@ -45,8 +45,8 @@
 | `frontend/` | 素の HTML / CSS / JavaScript による UI と Node.js のローカルサーバー（静的ファイル、ローカルペアリング、同一オリジンのプロキシ）。ビルド手順はなく、`npm install` も不要 |
 | `backend/` | Python / FastAPI：メールの読み取り（Gmail API、IMAP）、日次処理ループ、ルール抽出、明細の取り込み、家計簿と資産の計算、初期設定フロー。保存先は SQLite |
 | `agent/` | Python / FastAPI：LLM の呼び出し（Qwen）、埋め込み（OpenAI）と LanceDB ベクトルデータベース、ツール実行、レシート認識、分類、明細の補完、プランと自動タスク |
-| ルート | 統合ランチャー `run.py`（3 つのサービスの一括起動、空きポートの自動選択、ブラウザのペアリング、一括停止）、スモークテスト `smoke.py`、Windows 用の起動 / 停止 / インストールスクリプト、依存関係リスト `requirements.txt` と `constraints.txt`、デプロイ説明 `DEPLOYMENT.md` |
-| `release/` | ポータブル版のビルドスクリプト `build.py`・`portable.py`、ランタイム一覧 `RUNTIMES.json`、パッケージ同梱の説明 `README.package.md` |
+| ルート | 統合ランチャー `run.py`（3 つのサービスの一括起動、空きポートの自動選択、ブラウザのペアリング、一括停止）、スモークテスト `smoke.py`、依存関係リスト `requirements.txt` と `constraints.txt`、デプロイ説明 `DEPLOYMENT.md` |
+| `release/` | ポータブル版のビルドスクリプト `build.py`・`portable.py`、ランタイム一覧 `RUNTIMES.json`、パッケージ同梱の説明 `README.package.md`。`release/windows/` は Windows 用の起動 / 停止 / インストールスクリプトで、ビルド時にパッケージのルートに配置されます |
 
 3 つのサービスはそれぞれの認証情報で互いに認証し、ブラウザが長期的な鍵を受け取ることはありません。
 

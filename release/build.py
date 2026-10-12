@@ -165,8 +165,11 @@ def build(args):
     for name in ('LICENSE.md', 'README.md', 'pyproject.toml'):
         copy(vendor / name, root / 'agent/vendor/ddgs' / name)
     for name in ('run.py', 'smoke.py', 'requirements.txt', 'constraints.txt', 'THIRD_PARTY_NOTICES.md',
-                 'install_windows.ps1', 'start_windows.cmd', 'stop_windows.cmd', 'LICENSE', 'DEPLOYMENT.md'):
+                 'LICENSE', 'DEPLOYMENT.md'):
         copy(ROOT / name, root / name)
+    # Platform launchers live in release/<platform>/ in the repository and sit at the package root.
+    for name in ('install_windows.ps1', 'start_windows.cmd', 'stop_windows.cmd'):
+        copy(HERE / 'windows' / name, root / name)
     # The package opens with the product introduction; the full install and operations guide ships beside it.
     copy(HERE / 'README.package.md', root / 'README.md')
 
