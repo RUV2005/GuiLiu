@@ -1,5 +1,7 @@
 # 归流 GUILIU
 
+**简体中文** | [日本語](README.ja.md) | [English](README.en.md)
+
 **自动整理你的财务记录，解释每一次变化，并持续告诉你距离目标还有多远。**
 
 归流是一款在你自己电脑上运行的 AI 个人财务工作台。它从银行通知邮件、小票截图和支付宝、微信账单里自动汇集消费，整理成一本可信的账本；再用报告式的首页和一个会分析的 Agent，帮你看懂钱花在了哪里、和上个月比有什么不同、离储蓄目标还差多少。
@@ -26,7 +28,9 @@
 
 ## 下载使用
 
-1. 从 Releases 下载 `GUILIU-<版本>-win-x64.zip`。便携版自带 Python 3.13、Node 22 和全部依赖，不需要另外安装任何东西。
+**[下载最新版本](https://github.com/rhinoqvq/GuiLiu/releases/latest)**（Windows 10 / 11，64 位）
+
+1. 在上面的页面下载 `GUILIU-<版本>-win-x64.zip`。便携版自带 Python 3.13、Node 22 和全部依赖，不需要另外安装任何东西。
 2. 完整解压到有写入权限的文件夹（如桌面），双击 `start_windows.cmd`。启动器会自动选择空闲端口并打开浏览器。
 3. 首次使用按页面完成初始化：配置并检测 API → 连接 Gmail / 163 → 建立邮件索引 → 识别银行来源 → 确认账户 → 设置小票发件邮箱 → 完成。
 
@@ -58,8 +62,6 @@ python -m venv .venv
 
 启动器会一次启动前端、后端和 Agent，自动选择空闲端口（默认 3000 / 8001 / 8000，被占用时顺延），并打开浏览器完成配对。运行数据写入 `.runtime/`，不要提交到 Git。调试时可以用 `--frontend-port`、`--backend-port`、`--agent-port` 固定端口；使用 Google 授权的“网页应用”类型客户端时，后端端口必须与 Google 控制台登记的回调地址一致。
 
-
-
 ## 当前状态
 
 0.1 候选版本，核心的记账、查询、资产和 Agent 分析功能已经可用。
@@ -79,11 +81,3 @@ python -m venv .venv
 - 服务离线提示页的照片：Michal Jarmoluk，CC0（来自 Pixnio）
 
 Gmail、163、OpenAI、Qwen 等名称和标识属于各自的权利人，这里只用来标明归流连接的服务，归流与这些公司没有关联。
-
----
-
-### English
-
-GUILIU is a local, AI-native personal finance workspace. It collects spending from bank notification emails (Gmail or NetEase 163), receipt photos and Alipay / WeChat statements, turns them into a trustworthy ledger, and explains each change through a report-style overview and an analytical Agent that answers questions with charts. It runs on your own computer for a single user; mail is read only, and model, embedding and mail services are called only for the steps that need them. The interface is available in Chinese, Japanese and English.
-
-Download the Windows portable build from Releases, extract it and double-click `start_windows.cmd`; the launcher picks free ports and opens your browser. To run from source, install Python 3.13 and Node.js 22+, then run `python run.py serve` from the repository root. Licensed under MIT, © 2026 rhinoqvq.
