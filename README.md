@@ -24,7 +24,7 @@
 - 需要外部服务的环节：邮件读取（Google / 网易）、信息提取与对话（通义千问）、文本向量化（OpenAI）、Agent 联网搜索、汇率与行情（ExchangeRate-API、Frankfurter、Yahoo Finance、gold-api.com）。相关邮件和小票内容会发给你自己配置的模型服务，调用费用由服务商收取。
 - 归流面向本机单人使用，不要把服务暴露到局域网或公网。
 
-## 下载使用（Windows 便携版）
+## 下载使用
 
 1. 从 Releases 下载 `GUILIU-<版本>-win-x64.zip`。便携版自带 Python 3.13、Node 22 和全部依赖，不需要另外安装任何东西。
 2. 完整解压到有写入权限的文件夹（如桌面），双击 `start_windows.cmd`。启动器会自动选择空闲端口并打开浏览器。
@@ -58,15 +58,7 @@ python -m venv .venv
 
 启动器会一次启动前端、后端和 Agent，自动选择空闲端口（默认 3000 / 8001 / 8000，被占用时顺延），并打开浏览器完成配对。运行数据写入 `.runtime/`，不要提交到 Git。调试时可以用 `--frontend-port`、`--backend-port`、`--agent-port` 固定端口；使用 Google 授权的“网页应用”类型客户端时，后端端口必须与 Google 控制台登记的回调地址一致。
 
-## 打包便携版
 
-```powershell
-.\.venv\Scripts\python.exe release\build.py --output dist\<版本号> --version <版本号>-win-x64 `
-  --wheelhouse <Python 3.13 依赖包目录> --dependency-sources <依赖源码与许可证目录> `
-  --runtime-downloads <运行环境目录>
-```
-
-运行环境目录里放 `release/RUNTIMES.json` 和其中列出的官方 Python、Node 压缩包。打包脚本会校验压缩包的 SHA-256、把依赖装进包内的 Python、扫描密钥和个人数据，并生成文件清单 `MANIFEST.json`（可用 `run.py verify` 校验）。不带 `--runtime-downloads` 时打出的是需要自行安装 Python 和 Node 的离线依赖版。
 
 ## 当前状态
 
@@ -75,7 +67,6 @@ python -m venv .venv
 - 目前只在 Windows 上完整验证过。
 - 文本向量化目前使用 OpenAI；币种目前支持日元和人民币。
 - 部分银行邮件未写时区时，按日本时间解释。
-- 持仓随行情估值等功能仍在规划中。
 
 ## 许可证
 
