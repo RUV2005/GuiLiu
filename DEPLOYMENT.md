@@ -1,6 +1,6 @@
 # 归流 GUILIU 本地部署候选版
 
-这是从现有前端、后端和 Agent 工作目录生成的干净发布候选包，不包含本机个人数据。Windows 便携版额外附带 Python、Node 和已安装的依赖，完整解压后即可双击启动。
+这是从现有前端、后端和 Agent 工作目录生成的干净发布候选包，不包含本机个人数据。Windows 免安装版额外附带 Python、Node 和已安装的依赖，完整解压后即可双击启动。
 
 ## 目录
 
@@ -22,7 +22,7 @@ GUILIU/
 
 ## 安装
 
-### Windows 便携版
+### Windows 免安装版
 
 适用于 Windows 10 / 11 x64。包内有 `runtime/` 和 `RUNTIMES.json` 时，无需安装 Python、Node、pip 或 npm，也不需要执行 `install_windows.ps1`。完整解压到有写入权限的文件夹后，双击 `start_windows.cmd`；在页面中一键关闭，或双击 `stop_windows.cmd`。不要在 ZIP 预览窗口中运行。
 

@@ -30,7 +30,7 @@
 
 **[下载最新版本](https://github.com/rhinoqvq/GuiLiu/releases/latest)**（Windows 10 / 11，64 位）
 
-1. 在上面的页面下载 `GUILIU-<版本>-win-x64.zip`。便携版自带 Python 3.13、Node 22 和全部依赖，不需要另外安装任何东西。
+1. 在上面的页面下载 `GUILIU-<版本>-win-x64.zip`。压缩包里已经包含 Python 3.13、Node 22 和全部依赖，解压就能用，不需要另外安装任何东西。
 2. 完整解压到有写入权限的文件夹（如桌面），双击 `start_windows.cmd`。启动器会自动选择空闲端口并打开浏览器。
 3. 首次使用按页面完成初始化：配置并检测 API → 连接 Gmail / 163 → 建立邮件索引 → 识别银行来源 → 确认账户 → 设置小票发件邮箱 → 完成。
 
@@ -46,7 +46,7 @@
 | `backend/` | Python / FastAPI：邮件读取（Gmail API、IMAP）、日常处理循环、规则提取、账单导入、账本与资产计算、初始化流程，SQLite 存储 |
 | `agent/` | Python / FastAPI：大模型调用（通义千问）、Embedding（OpenAI）与 LanceDB 向量库、工具执行、小票识别、分类、明细补全、计划与自动任务 |
 | 根目录 | 统一启动器 `run.py`（一次启动三端、自动选择空闲端口、配对浏览器、统一关闭）、冒烟测试 `smoke.py`、Windows 启动 / 关闭 / 安装脚本、依赖清单 `requirements.txt` 和 `constraints.txt`、部署说明 `DEPLOYMENT.md` |
-| `release/` | 便携版打包脚本 `build.py`、`portable.py`、运行环境清单 `RUNTIMES.json`、包内说明 `README.package.md` |
+| `release/` | Windows 下载包的打包脚本 `build.py`、`portable.py`、运行环境清单 `RUNTIMES.json`、包内说明 `README.package.md` |
 
 三个服务之间用各自的凭据互相认证，浏览器拿不到长期密钥。
 
