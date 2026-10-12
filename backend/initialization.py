@@ -475,7 +475,8 @@ class Initialization:
         def on_bootstrap():
             if (self.state().get("mailbox_job") or {}).get("state") == "indexing":
                 self._job(state="discovering", error=None)
-                threading.Thread(target=self._discover_for_mailbox, name="mailbox-discovery", daemon=True).start()
+                self.workers["mailbox-discovery"] = threading.Thread(target=self._discover_for_mailbox, name="mailbox-discovery", daemon=True)
+                self.workers["mailbox-discovery"].start()
 
         def index():
             try:
@@ -542,18 +543,39 @@ class Initialization:
             logging.getLogger("uvicorn.error").exception("Could not start the new mailbox's import")
 
     def retry_mailbox_job(self):
-        """Settings: run the failed part of a mailbox job again; finished work is reused."""
-        state = self.state()
-        job = state.get("mailbox_job") or {}
-        indexing_failed = job.get("state") == "indexing" and state.get("vector_sync", {}).get("status") in {"failed", "interrupted"}
-        if job.get("state") == "rules_review":
-            self._job(state="rules", error=None)
-            threading.Thread(target=self._build_rules_for_mailbox, name="mailbox-rules", daemon=True).start()
-        elif job.get("state") == "failed" or indexing_failed:
-            self._job(state="indexing", error=None)
-            self._index_new_mailbox()
-        else:
-            raise SetupError("There is nothing to retry", 409)
+        """Settings: run the failed part of a mailbox job again; finished work is reused.
+
+        Once the new mailbox's first mails are indexed, a retry finds its banks again (resuming from the saved
+        discovery results) while indexing the rest carries on separately; before that it restarts indexing."""
+        with self.lock:
+            state = self.state()
+            job = state.get("mailbox_job") or {}
+            sync = state.get("vector_sync") or {}
+            first = (sync.get("bootstrap_by_provider") or {}).get(job.get("provider")) or {}
+            bootstrapped = bool(first.get("total")) and first.get("vectorized") == first.get("total")
+            indexing_stopped = sync.get("status") in {"failed", "interrupted"}
+            worker = self.workers.get("vector_db")
+            indexing_alive = bool(worker and worker.is_alive())
+            discovery = self.workers.get("mailbox-discovery")
+            if job.get("state") == "rules_review":
+                self._job(state="rules", error=None)
+                threading.Thread(target=self._build_rules_for_mailbox, name="mailbox-rules", daemon=True).start()
+            elif job.get("state") in {"failed", "indexing"} and bootstrapped:
+                # "indexing" here is a job an earlier retry left behind after its first mails were already done.
+                if discovery and discovery.is_alive():
+                    raise SetupError("The mailbox's banks are already being found", 409)
+                self._job(state="discovering", error=None)
+                self.workers["mailbox-discovery"] = threading.Thread(target=self._discover_for_mailbox, name="mailbox-discovery", daemon=True)
+                self.workers["mailbox-discovery"].start()
+                if indexing_stopped and not indexing_alive:
+                    self._index_new_mailbox()   # the rest of the mailbox; the job has moved on, so this only indexes
+            elif job.get("state") == "failed" or (job.get("state") == "indexing" and indexing_stopped):
+                if indexing_alive:
+                    raise SetupError("Wait for mail indexing to finish", 409)
+                self._job(state="indexing", error=None)
+                self._index_new_mailbox()
+            else:
+                raise SetupError("There is nothing to retry", 409)
         return self.mailbox_overview()
 
     def dismiss_mailbox_job(self):

@@ -104,6 +104,9 @@ function jobMarkup(ctx, overview) {
     if (['failed', 'interrupted'].includes(progress.indexing_status)) {
       line = text('jobFailed', { mailbox }) + (progress.indexing_error ? ' ' + describe(ctx, progress.indexing_error) : '');
       actions = button('data-mailbox-retry', 'retry', true) + button('data-mailbox-cancel', 'cancel');
+    } else if (indexed?.total && indexed.vectorized >= indexed.total) {
+      // The first mails are indexed but bank discovery has not started: let the user start it.
+      actions = button('data-mailbox-retry', 'retry', true) + button('data-mailbox-cancel', 'cancel');
     } else actions = button('data-mailbox-cancel', 'cancel');
   } else if (job.state === 'discovering') {
     const found = progress.discovery;
