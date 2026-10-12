@@ -1,0 +1,180 @@
+.plans-page { min-width: 0; container: plans-page / inline-size; }
+.plans-page [hidden] { display: none !important; }
+.plan-dialog fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.plan-account-choice { display: flex; align-items: flex-start; gap: 14px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+.plan-dialog .plan-account-choice input { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 4px; accent-color: var(--ink-soft); }
+.plan-account-choice strong { font-size: 14px; font-weight: 500; }
+.plan-account-choice small { display: block; color: var(--muted); font: 400 12px/1.8 var(--font-ui); margin-top: 8px; }
+.plan-questions { padding-left: 20px; font: 400 13px/1.9 var(--font-ui); }
+.plans-page .page-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.plans-page .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.plans-page .button { min-height: 36px; padding: 8px 12px; border-radius: 8px; font: 500 12px/1.5 var(--font-ui); white-space: normal; }
+.plans-preview { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 0 0 24px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
+.plans-preview > span { max-width: 580px; font: 400 12px/1.8 var(--font-ui); color: var(--muted); }
+.plans-preview strong { display: block; margin-bottom: 3px; color: var(--ink-soft); font-weight: 600; }
+.plans-preview .button-row { flex-shrink: 0; }
+.plans-layout { display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 32px; align-items: start; }
+.plans-list { position: sticky; top: 24px; min-width: 0; max-height: max(260px, calc(100dvh - 180px)); padding: 1px 6px 1px 1px; overflow: auto; scrollbar-width: thin; scrollbar-gutter: stable; }
+.plans-list > .button { margin-top: 14px; width: 100%; }
+.plan-detail-pane { min-width: 0; min-height: 520px; container: plan-detail / inline-size; }
+.plans-layout:has(.plans-empty) { grid-template-columns: minmax(0, 1fr); }
+.plans-list:has(.plans-empty) { position: static; max-height: none; }
+.plan-detail-pane:empty { display: none; }
+.plans-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.plan-card { display: grid; width: 100%; grid-template-rows: auto minmax(24px, auto) auto 4px auto; gap: 10px; min-width: 0; padding: 16px; color: var(--ink); background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; text-align: left; transition: border-color 240ms ease, background 240ms ease, box-shadow 240ms ease; }
+.plan-card:hover { border-color: var(--muted); background: var(--surface-hover); }
+.plan-card[aria-pressed="true"] { border-color: var(--ink-soft); box-shadow: inset 2px 0 0 var(--ink-soft); }
+.plan-card-top, .plan-card-bottom { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font: 400 11px/1.6 var(--font-ui); color: var(--muted); }
+.plan-card-top > span { overflow-wrap: anywhere; }
+.plan-card-title { display: block; font: 500 18px/1.4 var(--font-editorial); overflow-wrap: anywhere; }
+.plan-card-amount { display: block; font: 600 16px/1.4 var(--font-numeric); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.plan-card-amount small { display: block; color: var(--muted); font: 400 11px/1.7 var(--font-numeric); margin-top: 4px; }
+.plan-card-progress { height: 4px; background: var(--line); display: block; border-radius: 2px; overflow: hidden; }
+.plan-card-progress i { display: block; width: var(--plan-progress); height: 100%; background: var(--ink-soft); border-radius: inherit; transition: width 650ms cubic-bezier(.22,.7,.2,1); }
+.plan-card-bottom strong { color: var(--ink-soft); font-weight: 500; }
+.plan-report { margin-top: 0; min-width: 0; }
+.plan-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.plan-detail-heading h2 { font: 500 28px/1.5 var(--font-editorial); margin: 0; overflow-wrap: anywhere; }
+.plan-detail-heading > .button { flex-shrink: 0; }
+.plan-muted { color: var(--muted); font: 400 12px/1.8 var(--font-ui); overflow-wrap: anywhere; }
+.plan-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 0; padding: 28px 0; }
+.plan-metrics dt { margin-bottom: 10px; color: var(--muted); font: 400 12px/1.6 var(--font-ui); }
+.plan-metrics dd { margin: 0; color: var(--ink); font: 500 19px/1.6 var(--font-numeric); overflow-wrap: anywhere; }
+.plan-metrics dd strong { font-weight: 600; }
+.plan-progress-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 14px 24px; padding-bottom: 24px; }
+/* Share of the target, under the two headline metrics. */
+.plan-progress-line { display: grid; gap: 8px; margin: -10px 0 24px; }
+.plan-summary-bar { display: block; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.plan-summary-bar i { display: block; width: var(--plan-progress); height: 100%; background: var(--ink-soft); border-radius: inherit; transition: width 650ms cubic-bezier(.22,.7,.2,1); }
+.plan-progress-caption { color: var(--muted); font: 400 12px/1.6 var(--font-ui); }
+.plan-progress-caption strong { color: var(--ink-soft); font: 500 12px/1.6 var(--font-numeric); }
+.plan-analysis { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 36px; padding: 24px 0 28px; border-top: 1px solid var(--line); }
+.plan-trend, .plan-funding { min-width: 0; }
+.plan-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+.plan-section-heading h3 { font: 600 14px/1.6 var(--font-ui); margin: 0; }
+.plan-section-heading > span { color: var(--muted); font: 400 12px/1.5 var(--font-numeric); }
+.plan-trend .line-chart { max-width: 100%; }
+.plan-forecast-chart { --plan-projection: #63829e; min-width: 0; }
+.plan-chart-key { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; font: 400 12px/1.6 var(--font-ui); color: var(--muted); }
+.plan-chart-key > span, .plan-chart-target > span { display: inline-flex; align-items: center; gap: 8px; }
+.plan-chart-key i, .plan-chart-target i { display: inline-block; width: 18px; border-top: 2px solid var(--ink-soft); }
+.plan-chart-key .plan-key-forecast { border-color: var(--plan-projection); border-top-style: dashed; }
+.plan-chart-key .plan-chart-currency { margin-left: auto; font-family: var(--font-numeric); }
+.plan-chart-target { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; padding: 16px 0 6px; font: 400 12px/1.6 var(--font-ui); color: var(--muted); }
+.plan-chart-target i { border-width: 1px; border-color: var(--muted); border-top-style: dashed; }
+.plan-chart-target strong { font: 500 14px/1.6 var(--font-numeric); color: var(--ink-soft); overflow-wrap: anywhere; }
+.plan-forecast-chart .chart-line { stroke: var(--ink-soft); stroke-width: 2; }
+.plan-forecast-chart .chart-axis-label { fill: var(--muted); font-size: 11px; }
+.plan-forecast-chart .plan-series-forecast .chart-line { stroke: var(--plan-projection); stroke-dasharray: 5 5; }
+.plan-forecast-chart .plan-series-forecast .chart-point { stroke: var(--plan-projection); }
+.plan-forecast-chart .chart-point { opacity: 0; }
+.plan-forecast-chart .chart-point.is-isolated, .plan-forecast-chart .is-chart-active .chart-point { opacity: 1; }
+.plan-forecast-chart .plan-series-forecast { --agent-series: var(--plan-projection); }
+.plan-forecast-region { fill: var(--plan-projection); fill-opacity: .055; }
+.plan-target-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 5; opacity: .6; }
+.plan-deadline-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 4; opacity: .5; }
+.plan-today-line { stroke: var(--ink-soft); stroke-width: 1; opacity: .4; }
+.plan-today-label { fill: var(--ink-soft); font: 500 11px var(--font-ui); }
+.plan-chart-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-top: 18px; margin: 6px 0 0; border-top: 1px solid var(--line); }
+.plan-chart-dates > div:last-child { text-align: right; }
+.plan-chart-dates dt { color: var(--muted); font: 400 12px/1.6 var(--font-ui); }
+.plan-chart-dates dd { margin: 6px 0 0; font: 500 14px/1.6 var(--font-numeric); color: var(--ink-soft); overflow-wrap: anywhere; }
+[data-theme="dark"] .plan-forecast-chart { --plan-projection: #91aec5; }
+.plan-funding-row { display: grid; gap: 7px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.plan-funding-row strong { font: 500 13px/1.6 var(--font-ui); overflow-wrap: anywhere; }
+.plan-funding-row > span { font: 500 20px/1.5 var(--font-numeric); overflow-wrap: anywhere; }
+.plan-funding-row small { color: var(--muted); font: 400 12px/1.6 var(--font-ui); }
+.plan-allocation-value, .plan-allocation-caption { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
+.plan-allocation-value > span, .plan-allocation-caption > span { color: var(--muted); font: 400 12px/1.6 var(--font-ui); }
+.plan-allocation-value output { font: 500 18px/1.6 var(--font-numeric); overflow-wrap: anywhere; }
+.plan-allocation-caption { padding-top: 6px; }
+.plan-allocation-caption output { color: var(--ink-soft); font: 500 13px/1.6 var(--font-numeric); }
+.plans-page .plan-allocation-slider { appearance: none; display: block; width: 100%; min-width: 0; height: 26px; min-height: 0; margin: 0; padding: 0; border: 0; box-shadow: none; border-radius: 0; cursor: pointer; background: transparent; touch-action: pan-y; }
+.plan-allocation-slider::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--ink-soft) var(--allocation-fill), var(--line-strong) var(--allocation-fill)); }
+.plan-allocation-slider::-moz-range-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--ink-soft) var(--allocation-fill), var(--line-strong) var(--allocation-fill)); }
+.plan-allocation-slider::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; border: 2px solid var(--surface-1); background: var(--ink-soft); box-shadow: 0 0 0 1px var(--line-strong); transition: box-shadow 160ms ease; }
+.plan-allocation-slider::-moz-range-thumb { box-sizing: border-box; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--surface-1); background: var(--ink-soft); box-shadow: 0 0 0 1px var(--line-strong); }
+.plan-allocation-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px var(--line-strong); }
+.plan-allocation-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px var(--line-strong); }
+:root .plans-page input.plan-allocation-slider:focus-visible { box-shadow: none; }
+.plan-allocation-slider:disabled { opacity: .4; cursor: not-allowed; }
+.plan-allocation-actions { padding: 4px 0 6px; }
+.plan-allocation-summary { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.plan-activity { padding: 28px 0; border-top: 1px solid var(--line); }
+.plan-activity-scroll { overflow-x: auto; max-width: 100%; }
+.plan-activity table { width: 100%; min-width: 650px; border-collapse: collapse; text-align: left; font: 400 12px/1.7 var(--font-ui); }
+.plan-activity th { font-weight: 500; color: var(--muted); }
+.plan-activity th, .plan-activity td { padding: 14px 12px; border-bottom: 1px solid var(--line); }
+.plan-activity th:first-child, .plan-activity td:first-child { padding-left: 0; white-space: nowrap; }
+.plan-activity td small { display: block; color: var(--muted); font-size: 11px; }
+.plan-numeric { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.plan-activity tr[data-reversed="true"] { opacity: .6; }
+.plan-activity tr[data-reversed="true"] .plan-numeric { text-decoration: line-through; }
+.plan-activity > .button { margin-top: 18px; }
+.plan-manage { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; padding: 24px 0; border-top: 1px solid var(--line); }
+.plans-empty { padding: 48px 0; }
+.plans-empty h2 { font: 500 24px/1.5 var(--font-editorial); }
+.plans-empty p { color: var(--muted); font-size: 14px; }
+.plan-notice { border-left: 2px solid var(--ink-soft); background: var(--surface-hover); padding: 12px 16px; font: 400 13px/1.8 var(--font-ui); overflow-wrap: anywhere; }
+.plan-dialog { width: min(700px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); margin: auto; padding: 28px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-1); box-shadow: var(--shadow); overflow: auto; overscroll-behavior: contain; }
+.plan-dialog:not([open]) { display: none; }
+.plan-dialog[open] { animation: plan-dialog-enter 280ms cubic-bezier(.2,.8,.2,1) both; }
+.plan-dialog::backdrop { background: #0008; }
+.plan-dialog-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+.plan-dialog-heading h2 { margin: 0; font: 500 24px/1.5 var(--font-editorial); }
+.plan-dialog h3 { font: 600 16px/1.6 var(--font-ui); overflow-wrap: anywhere; }
+.plan-dialog p { font: 400 13px/1.8 var(--font-ui); }
+.plan-dialog .field, .plan-dialog input, .plan-dialog textarea, .plan-dialog select { min-width: 0; width: 100%; }
+.plan-dialog input, .plan-dialog textarea, .plan-dialog select { font-size: 14px; }
+.plan-dialog textarea { resize: vertical; line-height: 1.8; }
+.plan-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.plan-form-full { grid-column: 1 / -1; }
+.plan-form-full > .field { display: grid; }
+.plan-kind-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.plan-kind-choice .button { min-height: 44px; }
+.plan-kind-choice [aria-pressed="true"] { border-color: var(--ink-soft); background: var(--surface-hover); color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink-soft); }
+.plan-currency { align-content: start; }
+.plan-currency output { font: 500 16px/1.6 var(--font-numeric); color: var(--ink-soft); }
+.plan-currency small { color: var(--muted); font: 400 12px/1.6 var(--font-ui); }
+.plan-switch { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.plan-switch input { width: 18px; height: 18px; accent-color: var(--ink-soft); }
+.plan-allocation-field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, .7fr); gap: 24px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+.plan-allocation-field strong { font: 500 14px/1.6 var(--font-ui); overflow-wrap: anywhere; }
+.plan-allocation-field small { display: block; margin-top: 7px; color: var(--muted); font: 400 12px/1.8 var(--font-ui); }
+.plan-dialog form > footer { justify-content: flex-end; padding-top: 24px; margin-top: 16px; border-top: 1px solid var(--line); }
+.plan-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-right: auto; }
+.plan-edit-actions [data-plan-action="delete"] { color: var(--danger); }
+.plan-dialog [data-plan-dialog-error]:not(:empty) { padding: 12px 0 20px; font: 500 13px/1.7 var(--font-ui); }
+@keyframes plan-dialog-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@container plans-page (max-width: 880px) {
+  .plans-layout { grid-template-columns: 184px minmax(0, 1fr); gap: 24px; }
+  .plans-preview { flex-direction: column; align-items: flex-start; gap: 14px; }
+}
+@container plan-detail (max-width: 880px) {
+  .plan-analysis { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+}
+@container plans-page (max-width: 600px) {
+  .plans-layout { grid-template-columns: minmax(0, 1fr); }
+  .plans-list { position: static; max-height: 240px; }
+  .plans-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container plans-page (max-width: 480px) {
+  .plans-grid { grid-template-columns: minmax(0, 1fr); }
+  .plans-page .page-header { flex-wrap: wrap; }
+}
+@container plan-detail (max-width: 480px) {
+  .plan-section-heading { flex-wrap: wrap; }
+  .plan-detail-heading { align-items: flex-start; }
+  .plan-detail-heading h2 { font-size: 24px; }
+  .plan-metrics dd { font-size: 16px; }
+  .plan-trend .chart-legend { flex-wrap: wrap; }
+}
+@media (max-width: 520px) {
+  .plan-dialog { padding: 22px 18px; }
+  .plan-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .plan-allocation-field { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-card, .plan-card-progress i, .plan-summary-bar i { transition: none; }
+  .plan-dialog[open] { animation: none; }
+}

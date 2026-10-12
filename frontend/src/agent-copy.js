@@ -1,0 +1,51 @@
+const messages = {
+  zh: {
+    waitingUser: '原任务正在等待你的回复，请前往对应的 Agent 提示继续。',
+    panelTitle: '归流 AI', welcome: '今天想了解些什么？',
+    waitingReply: '正在等待回复', receivingReply: '正在接收回复', revealingReply: '正在显示回复',
+    expand: '打开 Agent 页面', sidePanel: '展开到右侧',
+    canvas: 'Agent 画布', latest: '回到最新对话', empty: '图表将在分析时出现', back: '返回', open: '查看分析', history: '查看这次分析',
+    partial: '部分数据，不代表完整总额', unknown: '未知', noData: '暂无可展示的数据', chartTotal: '图内合计', dataStatus: '数据状态',
+    invalidCanvas: '图表数据未通过校验，已保留上一份分析。', invalidReply: 'Agent 返回格式不兼容。',
+    interrupted: '连接中断。可继续接收本次回复，不会重新提交任务。', failed: '本次任务未完成。',
+    resume: '继续接收', legacyRetry: '重试请求', legacyWarning: '当前接口不支持任务去重，无法确认任务是否已经执行。重试会重新执行，可能重复记账，确认重试？',
+    nonResumable: '请求未正常完成。当前接口不支持断线续接，重试会重新执行任务。',
+    available: '新的分析已就绪，可在 Agent 工作区查看。', storage: '浏览器缓存空间不足，仍可从服务器恢复已保存的对话。',
+    local: '旧接口图表，数据口径未经服务端校验', you: '你', assistant: 'Agent', complete: '本次回复已完成',
+  },
+  ja: {
+    waitingUser: '元のタスクはあなたの返信を待っています。対応する Agent 情報から続けてください。',
+    panelTitle: '归流 AI', welcome: '今日は何を知りたいですか？',
+    waitingReply: '応答を待っています', receivingReply: '応答を受信しています', revealingReply: '応答を表示しています',
+    expand: 'Agent ページを開く', sidePanel: '右側に開く',
+    canvas: 'Agent キャンバス', latest: '最新の会話へ', empty: '分析に応じてグラフが表示されます', back: '戻る', open: '分析を開く', history: 'この分析を開く',
+    partial: '一部のデータです。総額ではありません', unknown: '不明', noData: '表示できるデータがありません', chartTotal: '表示分の合計', dataStatus: 'データの状態',
+    invalidCanvas: 'グラフのデータを検証できませんでした。前の分析を保持しています。', invalidReply: 'Agent の応答形式に対応していません。',
+    interrupted: '接続が途切れました。同じ処理の応答を再開できます。', failed: '処理を完了できませんでした。',
+    resume: '受信を再開', legacyRetry: '再試行', legacyWarning: '現在の API は重複実行を防止できません。再試行すると処理が再実行され、二重記帳になる可能性があります。続けますか？',
+    nonResumable: '応答を受信できませんでした。現在の API は受信再開に未対応のため、再試行は処理を再実行します。',
+    available: '新しい分析を Agent ワークスペースで確認できます。', storage: 'ブラウザの保存容量が不足しています。保存済みの会話はサーバーから復元できます。',
+    local: '旧 API のグラフです。集計条件はサーバーで未検証です', you: 'あなた', assistant: 'Agent', complete: '応答が完了しました',
+  },
+  en: {
+    waitingUser: 'The original task is awaiting your reply. Continue from its Agent information item.',
+    panelTitle: 'AutoBookkeeping AI', welcome: 'What would you like to explore?',
+    waitingReply: 'Waiting for a response', receivingReply: 'Receiving response', revealingReply: 'Displaying response',
+    expand: 'Open Agent page', sidePanel: 'Open side panel',
+    canvas: 'Agent Canvas', latest: 'Back to latest', empty: 'Charts will appear during analysis', back: 'Back', open: 'Open analysis', history: 'View this analysis',
+    partial: 'Partial data, not a complete total', unknown: 'Unknown', noData: 'No data to display', chartTotal: 'Shown total', dataStatus: 'Data status',
+    invalidCanvas: 'Chart validation failed. The previous analysis was kept.', invalidReply: 'The Agent response format is not supported.',
+    interrupted: 'Connection interrupted. Resume this response without resubmitting the task.', failed: 'The task did not complete.',
+    resume: 'Resume response', legacyRetry: 'Retry request', legacyWarning: 'This API cannot deduplicate tasks or confirm whether the task ran. Retrying starts it again and may duplicate transactions. Continue?',
+    nonResumable: 'The response did not complete. This API cannot resume a request; retrying runs the task again.',
+    available: 'New analysis is ready in the Agent workspace.', storage: 'Browser storage is full. Saved conversations can still be restored from the server.',
+    local: 'Legacy chart. Aggregation has not been verified by the server.', you: 'You', assistant: 'Agent', complete: 'Response complete',
+  },
+};
+export const agentText = (language, key) => (messages[language] || messages.en)[key] || key;
+const questions = {
+  zh: ['这个月的钱花在哪了？', '和上个月比有什么变化？', '哪里可以节省开支？'],
+  ja: ['今月は何にお金を使った？', '先月と比べてどう変わった？', 'どこを節約できそう？'],
+  en: ['Where did my money go this month?', 'What changed since last month?', 'Where could I save money?'],
+};
+export const agentQuestions = (language) => questions[language] || questions.en;

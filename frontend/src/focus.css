@@ -1,0 +1,74 @@
+:root {
+  --focus-color: #8e99a8;
+}
+
+/* Replace browser outlines, not focus behavior or keyboard access. */
+:where(button, a[href], input, select, textarea, summary, [tabindex], [contenteditable="true"]):focus {
+  outline: none;
+}
+
+:root :is(button, input, select, textarea, summary, [tabindex], [contenteditable="true"]):focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-color);
+}
+
+/* Headings take focus only programmatically (tabindex="-1") to move screen readers to a new step or page;
+   Tab never lands on them, so no visible box is drawn around the title. */
+:root :is(h1, h2, h3)[tabindex="-1"]:focus-visible { box-shadow: none; }
+
+/* Input feedback follows the control's existing border, never its square wrapper. */
+:root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus-visible {
+  border-color: var(--focus-color);
+  box-shadow: none;
+}
+
+:root .button.primary,
+:root .send-button { --focus-color: #555d69; }
+
+:root a[href]:focus-visible {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+:root .nav-link:focus-visible {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--focus-color);
+  text-decoration: none;
+}
+
+/* Composite controls have one focus indication on their visible surface. */
+:root .asset-search:focus-within,
+:root .agent-composer:focus-within { border-color: var(--focus-color); }
+
+:root .asset-search input:focus-visible,
+:root .agent-composer textarea:focus-visible { box-shadow: none; }
+
+:root :is(.mode-switch, .setting-switch):has(input:focus-visible) .switch-track {
+  box-shadow: inset 0 0 0 2px var(--focus-color);
+}
+
+:root :is(.agent-data-table, .agent-plot-scroll, input[type="range"]):focus-visible {
+  box-shadow: inset 0 -2px 0 var(--focus-color);
+}
+
+:root [role="separator"]:focus-visible { box-shadow: none; }
+:root .agent-workspace-resizer:focus-visible::before {
+  background: var(--focus-color);
+  box-shadow: none;
+}
+
+@media (forced-colors: active) {
+  :root :is(button, input, select, textarea, summary, [tabindex], [contenteditable="true"]):focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  :root .asset-search:focus-within,
+  :root .agent-composer:focus-within { border-color: Highlight; }
+  :root .asset-search input:focus-visible,
+  :root .agent-composer textarea:focus-visible { outline: none; }
+  :root :is(.mode-switch, .setting-switch):has(input:focus-visible) .switch-track {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  :root .agent-workspace-resizer:focus-visible::before { background: Highlight; }
+}

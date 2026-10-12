@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "ui": {
+    "language": "zh"
+  },
+  "services": {
+    "backend_url": "http://127.0.0.1:8001",
+    "agent_url": "http://127.0.0.1:8000"
+  },
+  "storage": {
+    "backend_db": "../.runtime/data/backend.sqlite3",
+    "server_data_dir": "../.runtime/data"
+  },
+  "models": {
+    "chat": "qwen3.8-flash",
+    "mail_classification": "qwen3.8-flash",
+    "dealing_classification": "qwen3.8-flash",
+    "ocr_intent": "qwen3.8-flash",
+    "ocr": "qwen3.8-flash",
+    "adr": "qwen3.8-flash"
+  },
+  "agent": {
+    "max_context_tokens": null,
+    "max_output_tokens": 2048,
+    "max_react_steps": 20,
+    "chat_output_tokens": null,
+    "scheduled_context_tokens": 64000,
+    "scheduled_output_tokens": 4096,
+    "scheduled_react_steps": 8
+  },
+  "loop": {
+    "enabled": true,
+    "interval_seconds": 60,
+    "ocr_mail_query": "",
+    "vector_mail_query": "in:inbox",
+    "vector_mail_max_results": 10,
+    "adr_ocr_limit": 10
+  },
+  "adr": {
+    "enabled": true,
+    "interval_seconds": 7200,
+    "new_mail_enabled": true,
+    "output_tokens": 4096,
+    "max_react_steps": 8
+  },
+  "automation": {
+    "enabled": true
+  }
+}

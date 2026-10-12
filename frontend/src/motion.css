@@ -1,0 +1,106 @@
+:root {
+  --motion-quick: 160ms;
+  --motion-control: 280ms;
+  --motion-surface: 520ms;
+  --motion-sidebar: 560ms;
+  --motion-agent: 1100ms;
+  --motion-ease: cubic-bezier(.28, 0, .16, 1);
+  --motion-feedback: cubic-bezier(.2, .7, .2, 1);
+}
+
+/* Applied only by the chart controller; axes, labels and layout stay visible. */
+.page-chart-mark-pending { opacity: 0 !important; }
+
+.button, .icon-button, .text-button, .status-button,
+.segmented-control button, .review-index button, .category-tag, .sort-button {
+  transition: color var(--motion-control) var(--motion-feedback),
+    background-color var(--motion-control) var(--motion-feedback),
+    border-color var(--motion-control) var(--motion-feedback),
+    box-shadow var(--motion-control) var(--motion-feedback),
+    transform var(--motion-control) var(--motion-feedback);
+}
+.button:active:not(:disabled), .icon-button:active:not(:disabled) {
+  transform: translateY(1px) scale(.98);
+  transition-duration: 90ms;
+}
+.row-actions .button:active { transform: none; }
+.button:disabled, .icon-button:disabled { transform: none; }
+.nav-link { transition: color 280ms var(--motion-feedback), background-color 280ms var(--motion-feedback); }
+.nav-link .icon { transition: transform 360ms var(--motion-ease), color 280ms var(--motion-feedback); }
+.nav-link::before { opacity: 0; transform: scaleY(.4); transition: opacity 320ms var(--motion-ease), transform 420ms var(--motion-ease); }
+.nav-link.is-active::before { opacity: 1; transform: scaleY(1); }
+.sidebar-refresh[aria-busy="true"] .icon { animation: sidebar-refresh-turn 1s linear infinite; }
+@keyframes sidebar-refresh-turn { to { transform: rotate(360deg); } }
+@media (hover: hover) and (pointer: fine) {
+  .nav-link:hover .icon { transform: translateX(2px); }
+  .button:not(.ghost):not(:disabled):not(:focus-visible):hover { box-shadow: 0 3px 10px rgb(0 0 0 / 12%); }
+  .text-button:hover .icon { transform: translateX(3px); }
+}
+.text-button .icon, .sidebar-toggle .icon { transition: transform 480ms var(--motion-ease); }
+.sidebar-collapsed .sidebar-toggle .icon { transform: rotateY(180deg); }
+.app-shell:not(.agent-workspace-open) { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0px 0px; transition: grid-template-columns var(--motion-sidebar) var(--motion-ease); }
+.app-shell.agent-open { grid-template-columns: var(--sidebar-width) minmax(500px, 1fr) 7px var(--agent-width); }
+.is-resizing-agent .app-shell { transition: none; }
+.app-shell.agent-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 7px minmax(0, var(--agent-width)); }
+.sidebar { z-index: 50; }
+.mobile-sidebar-toggle, .sidebar-backdrop { display: none; }
+/* Navigation rows retain their height while the sidebar labels are clipped. */
+.brand-row, .sidebar-collapsed .brand-row { position: relative; height: 86px; min-height: 86px; margin-bottom: 16px; align-items: flex-start; }
+.brand-row > .sidebar-toggle { position: absolute; left: 0; top: 48px; }
+.sidebar-collapsed .brand-row { flex-direction: row; }
+.nav-link { overflow: hidden; }
+.nav-link .icon { flex-shrink: 0; }
+.nav-heading { height: 16px; }
+.brand-copy, .nav-heading, .nav-label, .nav-badge, .profile-block > span:last-child { transition: opacity 240ms var(--motion-ease); }
+.sidebar-collapsed .nav-heading { display: block; visibility: hidden; }
+.sidebar-collapsed .nav-label { display: block; position: absolute; opacity: 0; pointer-events: none; }
+@media (max-width: 720px) {
+  .app-shell .mobile-sidebar-toggle { display: grid; position: fixed; z-index: 82; top: max(10px, env(safe-area-inset-top)); left: 10px; width: 38px; height: 38px; border-radius: 8px; background: #292d34; }
+  .app-shell > .sidebar { z-index: 81; top: 0; bottom: 0; right: auto; width: min(280px, calc(100vw - 52px)); height: 100dvh; padding: 64px 18px 18px; flex-direction: column; overflow: auto; transform: translateX(-100%); visibility: hidden; transition: transform var(--motion-sidebar) var(--motion-ease), visibility 0s var(--motion-sidebar); }
+  .mobile-sidebar-open > .sidebar { transform: translateX(0); visibility: visible; transition-delay: 0s; }
+  .app-shell > .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 80; background: rgb(0 0 0 / 36%); opacity: 0; visibility: hidden; transition: opacity var(--motion-sidebar) var(--motion-ease), visibility 0s var(--motion-sidebar); }
+  .mobile-sidebar-open > .sidebar-backdrop { opacity: 1; visibility: visible; transition-delay: 0s; }
+  .app-shell .sidebar .brand-row { display: flex; height: 54px; min-height: 54px; margin-bottom: 20px; }
+  .app-shell .sidebar .brand-copy { display: grid; }
+  .app-shell .sidebar .sidebar-toggle { display: none; }
+  .app-shell .sidebar .nav-block, .app-shell .sidebar .sidebar-footer { display: grid; flex: none; gap: 6px; }
+  .app-shell .sidebar .sidebar-footer { margin-top: auto; padding-top: 20px; }
+  .app-shell .sidebar .sidebar-utility { width: 44px; height: 44px; }
+  .app-shell .sidebar .nav-link { width: 100%; min-height: 44px; justify-content: flex-start; padding: 10px 12px; }
+  .app-shell .sidebar .nav-label { display: block; position: static; opacity: 1; }
+  .app-shell .sidebar .nav-heading { display: block; visibility: visible; }
+  .app-shell > .main-workspace { padding-bottom: 18px; }
+  .app-shell.agent-workspace-open { height: 100dvh; }
+  .agent-workspace-page { padding-top: 60px; }
+  .app-shell > .agent-panel { top: 10px; right: 10px; bottom: 10px; width: calc(100vw - 76px); margin: 0; }
+}
+@media (min-width: 981px) and (max-width: 1260px) {
+  .app-shell.agent-open { grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 7px minmax(0, var(--agent-width)); }
+}
+/* Tablet layout uses a fixed sidebar and margins instead of grid tracks. */
+@media (min-width: 721px) and (max-width: 980px) {
+  .app-shell:not(.agent-workspace-open) > .sidebar { transition: width var(--motion-sidebar) var(--motion-ease); }
+  .app-shell:not(.agent-workspace-open) > .main-workspace { transition: margin-left var(--motion-sidebar) var(--motion-ease); }
+}
+
+.switch-track { transition: background-color 380ms var(--motion-ease), border-color 380ms var(--motion-ease); }
+.switch-track i, .switch-track b { transition: transform 460ms var(--motion-ease), background-color 320ms var(--motion-ease); }
+.filter-toggle > .icon:last-child, .adr-toggle > .icon { transition: transform 420ms var(--motion-ease); }
+.ledger-row, .ledger-row > td, .editable-value { transition: background-color 180ms var(--motion-feedback), color 180ms var(--motion-feedback); }
+.field :is(input, select, textarea), .filter-panel input, .system-search input,
+.ledger-search input, .global-search-wrap > input, .agent-composer {
+  transition: border-color 280ms var(--motion-feedback), background-color 280ms var(--motion-feedback), box-shadow 280ms var(--motion-feedback);
+}
+.search-popover button { transition: background-color 220ms var(--motion-feedback), color 220ms var(--motion-feedback); }
+.goal-progress-fill, .mini-progress > i { transition: width 700ms var(--motion-ease); }
+.donut-slice { transition: transform 340ms var(--motion-ease), fill-opacity 280ms var(--motion-feedback); }
+.agent-pie-segment { transition: filter 280ms var(--motion-feedback); }
+
+/* Entry effects are requested by the interaction, never by a table remount. */
+.modal-backdrop, .modal-sheet, .toast, .filter-panel,
+.adr-detail-row:not([hidden]) > td > * { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .nav-link:hover .icon, .text-button:hover .icon { transform: none; }
+}

@@ -1,0 +1,45 @@
+# 运行数据：账本、向量库、对话、凭据、日志
+.runtime/
+
+# 便携版运行环境与打包产物
+/runtime/
+/wheelhouse/
+/licenses/
+/dependency-sources/
+/MANIFEST.json
+/RELEASE.json
+/DEPENDENCIES.json
+/requirements-offline.txt
+/dist/
+*.zip
+SHA256SUMS.txt
+
+# 本机开发环境
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+.DS_Store
+._*
+Thumbs.db
+
+# 凭据与本机配置，防止从旧仓库误拷
+.env
+.env.*
+credentials.json
+token.json
+*.local.json
+/agent/.models/
+
+# 旧版直接运行时产生的数据，防止从旧仓库误拷
+*.db
+*.sqlite
+*.sqlite3
+*.log
+/backend/testdb
+/backend/testDB.backup*
+/backend/attachments/
+/backend/ZhenZeJson/
+/agent/AgentLog

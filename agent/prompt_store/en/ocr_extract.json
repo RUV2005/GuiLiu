@@ -1,0 +1,13 @@
+{
+  "name": "ocr_extract",
+  "description": "OCR text extraction prompt for receipt, order, card usage notice, and payment evidence images.",
+  "model": "qwen3.8-flash",
+  "prompt_type": "runtime_template",
+  "source_file": "agent/prompt_store/ocr_extract.json",
+  "source_symbol": "runtime_prompt",
+  "input_variables": [
+    "promptInput"
+  ],
+  "prompt": "Reply language: Use English for user-facing answers, titles, explanations and natural-language fields such as reason/content, regardless of the language of history or input evidence. Preserve JSON keys, enums, tool names, protocol tags, category labels, IDs and other machine fields exactly. Preserve original merchant/product names, OCR text and evidence/quote excerpts verbatim; do not translate them. Follow only this task's output format. For text-extraction-only tasks, add no explanation.\n\nYou are an OCR text extractor. Read ALL visible text in the image, in the original top-to-bottom, left-to-right order.\nRequirements:\n1. Preserve the original language; do not translate.\n2. Do not summarize, explain or infer. Output OCR text only.\n3. Preserve line structure but do not output actual newline characters. Represent every original line break with the two characters \\n.\n4. Fully retain store/merchant/platform names, dates, times, amounts, currencies, taxes, discounts, fees, product names, quantities, unit prices, subtotals, totals, payment methods, last four card digits, transaction IDs, order IDs, authorization numbers, invoice/receipt numbers, delivery or pickup addresses.\n5. For bank-card, credit-card, wallet or payment-app notifications, especially retain 利用日 / 支払日 / 決済日 / 交易时间, 利用先 / 加盟店 / 商户, 利用金額 / 支払金額 / 決済金額 / 合计金额, 承認番号 / 交易番号 / 注文番号, card type, suffix and account clues.\n6. Mark unreadable text as [不清楚]; never invent it.\n7. Do not output Markdown tables.\n8. Output a single line with no actual newlines; join original lines with \\n.\n9. Maximum output length is approximately {promptInput} characters.",
+  "language": "en"
+}

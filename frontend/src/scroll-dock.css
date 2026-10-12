@@ -1,0 +1,103 @@
+[data-dock-fields][hidden], .scroll-dock-popover[hidden], .scroll-dock-button[hidden] { display: none; }
+.scroll-dock-hint[hidden] { display: none; }
+.scroll-dock-hint {
+  position: fixed; z-index: 46; max-width: min(220px, calc(100vw - 16px)); padding: 7px 12px;
+  color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px;
+  box-shadow: var(--shadow); font: 500 13px/1.5 var(--font-ui); overflow-wrap: anywhere; pointer-events: none;
+}
+/* The permanent rail owns its gutter on every page, including the Agent canvas. */
+.app-shell > .main-workspace { padding-left: 76px; }
+.scroll-dock {
+  position: fixed; z-index: 44; left: calc(var(--sidebar-width) + 12px); top: 50%; transform: translateY(-50%);
+  transition: left var(--motion-sidebar) var(--motion-ease);
+  display: flex; flex-direction: column; gap: 5px; width: 52px; padding: 5px;
+  max-height: calc(100dvh - 32px); overflow-y: auto;
+  border: 1px solid var(--line-strong); border-radius: 26px;
+  background: #202329; box-shadow: 0 8px 28px rgba(0, 0, 0, .2);
+}
+.scroll-dock-button {
+  position: relative; display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px;
+  padding: 0; border-radius: 50%; aspect-ratio: 1; color: #b4b8c0; background: transparent;
+  transition: color 180ms ease, background-color 180ms ease;
+}
+.scroll-dock-button:hover, .scroll-dock-button[aria-expanded="true"], .scroll-dock-button[aria-pressed="true"], .scroll-dock-button[aria-current="page"] { color: var(--ink); background: #333943; }
+.scroll-dock-button[data-dock-action="review"] { margin-top: 6px; }
+.scroll-dock-badge {
+  position: absolute; top: -1px; right: -3px; min-width: 16px; padding: 1px 3px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-3); color: var(--ink-soft);
+  font: 600 9px/12px var(--font-numeric); pointer-events: none;
+}
+.scroll-dock-badge[hidden] { display: none; }
+.scroll-dock-button .icon { width: 19px; height: 19px; }
+/* The orbit stays on the border. Pausing before fading preserves its last angle. */
+.scroll-dock-button[data-dock-action="agent"] {
+  /* Clip the rotating square layers so they cannot enlarge the rail's scroll area. */
+  overflow: hidden;
+  --dock-agent-trail: rgba(218, 224, 231, .3);
+  --dock-agent-glint: #f4f6f8;
+}
+.scroll-dock-button[data-dock-action="agent"]::before,
+.scroll-dock-button[data-dock-action="agent"]::after {
+  content: ""; position: absolute; inset: 1px; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from 0deg, transparent 0deg 165deg, var(--dock-agent-trail) 245deg, var(--dock-agent-glint) 325deg 336deg, transparent 356deg);
+  -webkit-mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  mask-image: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  opacity: 0;
+  animation: dock-agent-orbit 2.8s cubic-bezier(.5, .25, .5, .75) infinite paused;
+  /* Gravity-inspired circle: omega(theta) / omega(top) = sqrt(5 - 4*cos(theta)).
+     Equal-time samples; bottom speed is 3x the top, with matching loop-end velocities. */
+  animation-timing-function: linear(
+    0, .016831, .034034, .051989, .071077, .091693, .114233, .139097,
+    .166667, .197291, .231247, .268699, .309641, .353849, .400843, .449880,
+    .5, .550120, .599157, .646151, .690359, .731301, .768753, .802709,
+    .833333, .860903, .885767, .908307, .928923, .948011, .965966, .983169, 1
+  );
+  transition: opacity 260ms cubic-bezier(.22, 1, .36, 1);
+}
+.scroll-dock-button[data-dock-action="agent"]::after { inset: 0; filter: blur(2px); }
+.scroll-dock-button[data-dock-action="agent"][data-running="true"]::before { opacity: 1; animation-play-state: running; }
+.scroll-dock-button[data-dock-action="agent"][data-running="true"]::after { opacity: .55; animation-play-state: running; }
+/* Center the 325-336deg highlight at twelve o'clock for the slowest point. */
+@keyframes dock-agent-orbit { from { transform: rotate(29.5deg); } to { transform: rotate(389.5deg); } }
+.scroll-dock-popover {
+  position: fixed; z-index: 45; display: flex; flex-direction: column; width: 320px; min-width: 0;
+  padding: 16px; border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface-2); box-shadow: var(--shadow); overflow: auto;
+  transition: left var(--motion-sidebar) var(--motion-ease), top var(--motion-sidebar) var(--motion-ease);
+}
+.scroll-dock-popover > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex: none; }
+.scroll-dock-popover h2 { min-width: 0; font: 600 14px/1.5 var(--font-ui); overflow-wrap: anywhere; }
+.scroll-dock-popover > header .icon-button { width: 30px; height: 30px; flex: none; }
+.scroll-dock-content { display: grid; gap: 6px; min-height: 0; min-width: 0; overflow-y: auto; }
+.scroll-dock-content .global-search-wrap { display: block; }
+.scroll-dock-content .global-search-wrap > .icon { top: 10px; }
+.scroll-dock-content .search-popover { position: static; margin-top: 10px; box-shadow: none; }
+.scroll-dock-popover.is-agent { padding: 0; border-radius: 29px; overflow: hidden; }
+.scroll-dock-popover.is-agent > header { display: none; }
+.scroll-dock-popover.is-agent > .scroll-dock-content { flex: 1; display: grid; overflow: hidden; }
+[data-dock-pin-agent] { display: none; }
+.scroll-dock-popover.is-agent [data-dock-pin-agent] { display: grid; }
+.scroll-dock-popover .scroll-dock-content > .agent-panel {
+  display: grid; position: static; grid-column: 1; grid-row: 1; width: 100%; height: 100%;
+  min-height: 0; margin: 0; border: 0; box-shadow: none;
+}
+@media (max-width: 720px) {
+  .scroll-dock { left: 8px; width: 48px; padding: 3px; border-radius: 24px; top: 50%; max-height: calc(100dvh - 120px); }
+  .app-shell > .main-workspace { padding-left: 60px; }
+  .app-shell:not(.agent-workspace-open) > .main-workspace { padding-top: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-dock-button { transition: none; }
+  .scroll-dock-button[data-dock-action="agent"]::before,
+  .scroll-dock-button[data-dock-action="agent"]::after { animation: none; transition: none; }
+  .scroll-dock-button[data-dock-action="agent"][data-running="true"]::before { background: var(--dock-agent-glint); opacity: .7; }
+  .scroll-dock-button[data-dock-action="agent"]::after { display: none; }
+}
+@media (forced-colors: active) {
+  .scroll-dock-button[data-dock-action="agent"]::before,
+  .scroll-dock-button[data-dock-action="agent"]::after { display: none; }
+  .scroll-dock-button[data-dock-action="agent"][data-running="true"]::before {
+    display: block; opacity: 1; border: 2px solid ButtonText; background: none;
+    -webkit-mask-image: none; mask-image: none; animation: none; transform: none;
+  }
+}

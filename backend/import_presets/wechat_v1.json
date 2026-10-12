@@ -1,0 +1,51 @@
+{
+  "preset_id": "wechat_v1",
+  "name": "微信支付账单流水",
+  "provider": "wechat",
+  "version": 2,
+  "extensions": [
+    ".xlsx"
+  ],
+  "encodings": [
+    "utf-8-sig",
+    "gb18030"
+  ],
+  "default_currency": "CNY",
+  "default_timezone": "Asia/Shanghai",
+  "columns": {
+    "time": "交易时间",
+    "transaction_type": "交易类型",
+    "shop_name": "交易对方",
+    "product_name": "商品",
+    "direction": "收/支",
+    "amount": "金额(元)",
+    "payment_method": "支付方式",
+    "status": "当前状态",
+    "transaction_id": "交易单号",
+    "merchant_order_id": "商户单号"
+  },
+  "expense_values": [
+    "支出"
+  ],
+  "income_values": ["收入"],
+  "income_success_statuses": ["已存入零钱", "已转入零钱通", "收款成功", "交易成功"],
+  "income_excluded_type_patterns": ["零钱充值|零钱提现|零钱通"],
+  "income_confirmation_patterns": ["转账|红包"],
+  "success_statuses": [
+    "支付成功"
+  ],
+  "review_statuses": [
+    "已转账"
+  ],
+  "excluded_type_patterns": [
+    "转账|红包|零钱充值|零钱提现|零钱通"
+  ],
+  "refund_patterns": [
+    "退款|退还|退回"
+  ],
+  "time_formats": [
+    "%Y-%m-%d %H:%M:%S"
+  ],
+  "replace_rules": [],
+  "extract_patterns": {}
+}

@@ -1,0 +1,140 @@
+/* AI surfaces: fluid glass (UI 质感方案 §4). Water rather than a lens: clear glass that lets the page blur through, light
+   entering from the upper edge, a bright meniscus rim, one thin cool line that marks AI, and a slow field of particles
+   with a few twinkling stars inside the glass (ai-starfield.js, drawn only inside each surface). Applies to the
+   Agent chat (side, popover, workspace) and the AI toolbar only, never to financial content, so numbers keep solid,
+   readable surfaces.
+   `:root[data-theme]` matches both themes (theme-init always sets it) and, loaded after theme.css, wins over the
+   per-theme solid fills without !important. */
+
+:root[data-theme] {
+  --ai-glass-tint: rgba(20, 23, 29, .34);
+  --ai-glass-light: rgba(255, 255, 255, .04);
+  --ai-glass-deep: rgba(132, 214, 255, .045);
+  --ai-glass-edge: rgba(255, 255, 255, .08);
+  --ai-glass-rim: rgba(255, 255, 255, .4);
+  --ai-glass-rim-low: rgba(255, 255, 255, .12);
+  --ai-glass-inner: rgba(255, 255, 255, .05);
+  --ai-glass-shadow: 0 18px 48px rgba(0, 0, 0, .32), 0 2px 8px rgba(0, 0, 0, .16);
+  --ai-glass-blur: blur(30px) saturate(190%);
+  --ai-line: linear-gradient(90deg, transparent, rgba(132, 214, 255, .62) 28%, rgba(188, 170, 255, .52) 64%, transparent);
+  --ai-well: rgba(255, 255, 255, .045);
+  --ai-well-edge: rgba(255, 255, 255, .1);
+  --ai-drop: rgba(255, 255, 255, .07);
+  --ai-drop-active: rgba(255, 255, 255, .13);
+  --ai-dock-tint: rgba(30, 34, 41, .38);
+}
+:root[data-theme="light"] {
+  --ai-glass-tint: rgba(255, 255, 255, .4);
+  --ai-glass-light: rgba(255, 255, 255, .35);
+  --ai-glass-deep: rgba(14, 116, 144, .05);
+  --ai-glass-edge: rgba(30, 42, 56, .09);
+  --ai-glass-rim: rgba(255, 255, 255, .98);
+  --ai-glass-rim-low: rgba(30, 42, 56, .07);
+  --ai-glass-inner: rgba(255, 255, 255, .7);
+  --ai-glass-shadow: 0 18px 44px rgba(32, 42, 54, .12), 0 2px 6px rgba(32, 42, 54, .05);
+  --ai-line: linear-gradient(90deg, transparent, rgba(14, 116, 144, .5) 28%, rgba(91, 74, 190, .42) 64%, transparent);
+  --ai-well: rgba(255, 255, 255, .62);
+  --ai-well-edge: rgba(30, 42, 56, .1);
+  --ai-drop: rgba(255, 255, 255, .7);
+  --ai-drop-active: rgba(255, 255, 255, .96);
+  --ai-dock-tint: rgba(255, 255, 255, .4);
+}
+
+/* The rim needs a positioned box. Zero specificity, so every existing layout rule wins: the popover and the
+   narrow-screen side panel stay position: fixed, the panel hosted inside the popover stays static. */
+:where(.agent-panel, .agent-chat-column) { position: relative; }
+
+/* Glass body. Material only: no size, offset or position changes. */
+:root[data-theme] :is(.agent-panel, .agent-chat-column, .scroll-dock-popover.is-agent) {
+  isolation: isolate;
+  background:
+    var(--ai-line) 50% 0 / 64% 1px no-repeat,
+    radial-gradient(120% 28% at 12% 0%, var(--ai-glass-light), transparent 70%),
+    radial-gradient(90% 45% at 100% 100%, var(--ai-glass-deep), transparent 72%),
+    var(--ai-glass-tint);
+  -webkit-backdrop-filter: var(--ai-glass-blur);
+  backdrop-filter: var(--ai-glass-blur);
+  border: 1px solid var(--ai-glass-edge);
+  /* Thickness: the slab's edges gather light (inner edge glow) and its upper lip catches it most. */
+  box-shadow: var(--ai-glass-shadow), inset 0 1px 0 var(--ai-glass-rim-low), inset 0 0 22px -8px var(--ai-glass-inner),
+    inset 0 -22px 36px -32px var(--ai-glass-rim);
+}
+/* Meniscus: the rim catches light at the upper left and again faintly at the lower right. */
+:root[data-theme] :is(.agent-panel, .agent-chat-column, .scroll-dock-popover.is-agent)::before {
+  content: ""; position: absolute; inset: -1px; z-index: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: linear-gradient(155deg, var(--ai-glass-rim), var(--ai-glass-rim-low) 26%, transparent 52%, var(--ai-glass-rim-low) 86%, var(--ai-glass-rim));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  opacity: .8;
+}
+/* Particles and stars (ai-starfield.js): a canvas exactly the host's box, under the content and clipped by the host,
+   so it never reaches past the window or grows a scroll area. */
+.ai-starfield { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; }
+/* The popover is the glass; the chat panel it hosts stays clear so the material is not stacked twice. */
+:root[data-theme] .scroll-dock-popover .scroll-dock-content > .agent-panel {
+  background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; border: 0; box-shadow: none;
+}
+:root[data-theme] .scroll-dock-popover .scroll-dock-content > .agent-panel::before,
+:root[data-theme] .scroll-dock-popover .scroll-dock-content > .agent-panel::after { content: none; }
+
+/* Inner layers let the water show through. */
+:root[data-theme] :is(.agent-panel, .agent-chat-column) .agent-input-area { background: transparent; }
+
+/* Composer: a clear well in the glass with a lit lower lip. */
+:root[data-theme] .agent-composer {
+  background: var(--ai-well);
+  border-color: var(--ai-well-edge);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .12), 0 1px 0 var(--ai-glass-rim-low), 0 10px 28px -18px rgba(0, 0, 0, .5);
+}
+:root[data-theme="light"] .agent-composer { box-shadow: inset 0 1px 2px rgba(30, 42, 56, .06), 0 1px 0 #fff, 0 10px 24px -18px rgba(32, 42, 54, .3); }
+/* Send: a droplet with its highlight on top. */
+:root[data-theme] .agent-composer .send-button {
+  background: radial-gradient(circle at 50% 28%, #fff, var(--ink) 72%);
+  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, .14), 0 4px 12px -4px rgba(0, 0, 0, .45);
+}
+:root[data-theme="light"] .agent-composer .send-button {
+  background: radial-gradient(circle at 50% 26%, #4a5666, #18202b 74%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .22), 0 4px 12px -4px rgba(24, 32, 43, .45);
+}
+/* The user's words float as a clear drop instead of a solid chat bubble. */
+:root[data-theme] :is(.agent-panel, .agent-chat-column) .user-query p {
+  background: var(--ai-drop);
+  border-color: var(--ai-well-edge);
+  box-shadow: inset 0 1px 0 var(--ai-glass-rim-low);
+}
+
+/* AI toolbar: the same glass as a capsule; the current tool is a raised droplet. Geometry is unchanged. */
+:root[data-theme] .scroll-dock {
+  background: radial-gradient(160% 18% at 50% 0%, var(--ai-glass-light), transparent 70%), var(--ai-dock-tint);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  border-color: var(--ai-glass-edge);
+  box-shadow: var(--ai-glass-shadow), inset 0 1px 0 var(--ai-glass-rim-low), inset 0 0 14px -6px var(--ai-glass-inner),
+    inset 0 -14px 22px -20px var(--ai-glass-rim);
+}
+:root[data-theme] .scroll-dock-button:is(:hover, [aria-expanded="true"], [aria-pressed="true"], [aria-current="page"]) {
+  background: radial-gradient(circle at 50% 30%, var(--ai-drop-active), var(--ai-drop) 78%);
+  box-shadow: inset 0 1px 0 var(--ai-glass-rim-low), inset 0 0 0 1px var(--ai-well-edge);
+}
+:root[data-theme="light"] .scroll-dock-button:is(:hover, [aria-expanded="true"], [aria-pressed="true"], [aria-current="page"]) {
+  box-shadow: inset 0 1px 0 #fff, 0 2px 6px rgba(32, 42, 54, .12), inset 0 0 0 1px var(--ai-well-edge);
+}
+
+/* Without backdrop blur, or when the user asks for less transparency, keep the same look on solid fills. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-theme] { --ai-glass-tint: #15181d; --ai-dock-tint: #1d2026; }
+  :root[data-theme="light"] { --ai-glass-tint: #fbfcfd; --ai-dock-tint: #f3f5f8; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-theme] { --ai-glass-tint: #15181d; --ai-dock-tint: #1d2026; --ai-glass-blur: none; }
+  :root[data-theme="light"] { --ai-glass-tint: #fbfcfd; --ai-dock-tint: #f3f5f8; }
+}
+@media (forced-colors: active) {
+  :root[data-theme] :is(.agent-panel, .agent-chat-column, .scroll-dock-popover.is-agent, .scroll-dock) {
+    background: Canvas; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; border: 1px solid CanvasText;
+  }
+  :root[data-theme] :is(.agent-panel, .agent-chat-column, .scroll-dock-popover.is-agent)::before,
+  :root[data-theme] :is(.agent-panel, .agent-chat-column, .scroll-dock-popover.is-agent)::after { content: none; }
+  .ai-starfield { display: none; }
+}

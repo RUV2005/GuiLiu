@@ -1,0 +1,49 @@
+{
+  "preset_id": "alipay_v1",
+  "name": "支付宝交易明细",
+  "provider": "alipay",
+  "version": 2,
+  "extensions": [
+    ".csv"
+  ],
+  "encodings": [
+    "utf-8-sig",
+    "gb18030"
+  ],
+  "default_currency": "CNY",
+  "default_timezone": "Asia/Shanghai",
+  "columns": {
+    "time": "交易时间",
+    "transaction_type": "交易分类",
+    "shop_name": "交易对方",
+    "product_name": "商品说明",
+    "direction": "收/支",
+    "amount": "金额",
+    "payment_method": "收/付款方式",
+    "status": "交易状态",
+    "transaction_id": "交易订单号",
+    "merchant_order_id": "商家订单号"
+  },
+  "expense_values": [
+    "支出"
+  ],
+  "income_values": ["收入"],
+  "income_success_statuses": ["交易成功"],
+  "income_excluded_type_patterns": ["^(投资理财|账户存取|信用借还)$"],
+  "income_confirmation_patterns": ["转账|红包"],
+  "success_statuses": [
+    "交易成功",
+    "充值成功"
+  ],
+  "excluded_type_patterns": [
+    "^(转账红包|投资理财|账户存取|信用借还|收入)$"
+  ],
+  "refund_patterns": [
+    "退款|退还"
+  ],
+  "time_formats": [
+    "%Y-%m-%d %H:%M:%S"
+  ],
+  "replace_rules": [],
+  "extract_patterns": {}
+}
