@@ -3,6 +3,7 @@
 // and wait while launch.py switches to it. Data is backed up before the switch and the previous version returns if the
 // new one does not start. One controller drives both, so an update keeps reporting on every page.
 import { escapeHtml as e, escapeAttr as a } from './utils.js';
+import { BUILD } from './build-info.js';
 
 const copy = {
   title: ['版本与更新', 'バージョンと更新', 'Version and updates'],
@@ -49,6 +50,9 @@ const copy = {
   stale: ['更新信息已变化，请重新检查。', '更新情報が変わりました。もう一度確認してください。', 'The update information changed; check again.'],
   failed: ['更新失败，请稍后重试。', '更新に失敗しました。後で再試行してください。', 'The update failed. Please retry later.'],
   checkedAt: ['上次检查：{time}', '前回の確認：{time}', 'Last checked: {time}'],
+  reloadNeeded: ['归流已更新到 {version}，刷新页面后即可使用新版本。', 'GUILIU は {version} に更新されました。ページを再読み込みすると新しいバージョンになります。',
+    'GUILIU is now on {version}. Reload the page to use it.'],
+  reload: ['刷新页面', 'ページを再読み込み', 'Reload page'],
   // The sidebar entry above the profile block.
   entryAvailable: ['新版本更新', '新バージョンに更新', 'Update available'],
   entryTitle: ['新版本 {version} 已发布。点一下自动更新：下载约 {size} MB，备份数据后重启归流，大约半分钟。',
@@ -62,6 +66,7 @@ const copy = {
   entrySlow: ['重启较慢，请稍后刷新', '再起動に時間がかかっています', 'Restart is slow; reload soon'],
   entryRestart: ['重启完成更新', '再起動して更新', 'Restart to update'],
   entryRetry: ['更新没成功，点一下重试', '更新に失敗しました。クリックで再試行', 'Update failed; click to retry'],
+  entryReload: ['已更新，点此刷新', '更新済み・再読み込み', 'Updated, reload'],
 };
 export const updateText = (language, key) => copy[key]?.[{ zh: 0, ja: 1, en: 2 }[language] ?? 0] ?? copy.failed[{ zh: 0, ja: 1, en: 2 }[language] ?? 0];
 const fill = (text, values) => Object.entries(values).reduce((value, [key, item]) => value.replaceAll('{' + key + '}', item), text);
@@ -70,8 +75,16 @@ const megabytes = bytes => (Math.max(0, Number(bytes) || 0) / 1048576).toFixed(1
 // While an update downloads, verifies and restarts, losing the services means they are restarting, not a failure.
 const UPDATING = new Set(['downloading', 'verifying', 'ready', 'restarting']);
 
-export function createUpdateState(source) {
-  return { source, status: null, loading: false, error: '', confirming: false, busy: false, restarting: false, slow: false, updating: false };
+// build is the version this page was loaded from (the release build, or Beta when running from source).
+export function createUpdateState(source, build = BUILD) {
+  return { source, build, status: null, loading: false, error: '', confirming: false, busy: false, restarting: false, slow: false, updating: false };
+}
+
+// The services already run another version than this page, e.g. an update finished while the page stayed open in another
+// tab or was not watching it: only a reload brings the page there. The page that started the update reloads by itself.
+export function reloadNeeded(state) {
+  const s = state?.status, build = state?.build || BUILD;
+  return Boolean(build.channel === 'release' && s?.supported && s.current && s.current !== build.version && !state.restarting);
 }
 
 export function updateSettingsView(ctx) {
@@ -80,7 +93,10 @@ export function updateSettingsView(ctx) {
   const line = (label, value) => '<div><dt>' + e(label) + '</dt><dd>' + e(value) + '</dd></div>';
   let body = '';
   if (s && !s.supported) body = '';
-  else if (s) {
+  else if (reloadNeeded(state)) {
+    body = '<p class="mailbox-settings-feedback" role="status">' + e(fill(text('reloadNeeded'), { version: s.current })) + '</p>' +
+      '<div class="mailbox-settings-actions"><button class="button primary" type="button" data-update-reload>' + e(text('reload')) + '</button></div>';
+  } else if (s) {
     const working = ['downloading', 'verifying', 'restarting'].includes(task.state) || state.restarting;
     if (s.failed?.version) body += '<p class="mailbox-settings-feedback" role="status">' + e(fill(text('rolledBack'), { version: s.failed.version })) + '</p>';
     if (state.restarting || task.state === 'restarting') {
@@ -123,9 +139,10 @@ export function updateSettingsView(ctx) {
 export function updateEntryView(ctx) {
   const state = ctx.state.updateSettings, s = state?.status;
   if (!s?.supported) return '';
-  const task = s.task || {}, text = key => updateText(ctx.language, key);
+  const task = s.task || {}, text = key => updateText(ctx.language, key), stale = reloadNeeded(state);
   let label, title = '', busy = true;
-  if (state.restarting || task.state === 'restarting') { label = text(state.slow ? 'entrySlow' : 'entryRestarting'); title = text(state.slow ? 'slow' : 'restarting'); }
+  if (stale) { label = text('entryReload'); title = fill(text('reloadNeeded'), { version: s.current }); busy = false; }
+  else if (state.restarting || task.state === 'restarting') { label = text(state.slow ? 'entrySlow' : 'entryRestarting'); title = text(state.slow ? 'slow' : 'restarting'); }
   else if (task.state === 'downloading') label = fill(text('entryDownloading'), { percent: Math.min(100, Math.floor(100 * (Number(task.received) || 0) / (Number(task.size) || 1))) });
   else if (task.state === 'verifying') label = text('entryVerifying');
   else {
@@ -135,7 +152,8 @@ export function updateEntryView(ctx) {
     else if (state.error || task.state === 'failed') { label = text('entryRetry'); title = text(state.error || task.error || 'failed'); }
     else { label = text('entryAvailable'); title = fill(text(s.compatible === false ? 'entryFullTitle' : 'entryTitle'), { version: s.latest, size: megabytes(s.size) }); }
   }
-  const mark = '<span class="sidebar-update-mark" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 11.5V4.5M4.75 7.5 8 4.25l3.25 3.25"/></svg></span>';
+  const mark = '<span class="sidebar-update-mark" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="' +
+    (stale ? 'M12.25 8a4.25 4.25 0 1 1-1.25-3M12.25 3v2.5H9.75' : 'M8 11.5V4.5M4.75 7.5 8 4.25l3.25 3.25') + '"/></svg></span>';
   return '<button class="sidebar-update' + (busy ? ' is-busy' : '') + '" type="button" data-update-entry title="' + a(title || label) + '" aria-label="' + a(label) + '"' +
     (busy || state.busy ? ' disabled' : '') + '>' + mark + '<span class="sidebar-update-label">' + e(label) + '</span></button>';
 }
@@ -162,7 +180,7 @@ function patchUpdateSettings(root, ctx) {
   const html = updateSettingsView(ctx);
   if (versions.get(host) === html) return true;
   const doc = host.ownerDocument, active = doc.activeElement;
-  const focus = active && host.contains(active) ? ['data-update-check', 'data-update-start', 'data-update-confirm', 'data-update-back', 'data-update-restart'].find(n => active.hasAttribute(n)) : '';
+  const focus = active && host.contains(active) ? ['data-update-check', 'data-update-start', 'data-update-confirm', 'data-update-back', 'data-update-restart', 'data-update-reload'].find(n => active.hasAttribute(n)) : '';
   const open = host.querySelector('details')?.open;
   const template = doc.createElement('template'); template.innerHTML = html;
   host.replaceChildren(...template.content.firstElementChild.childNodes);
@@ -174,15 +192,15 @@ function patchUpdateSettings(root, ctx) {
 
 export function createUpdateController({ state, api, source, context, root = () => document, reload = () => location.reload(),
   openSettings = () => { location.hash = '#settings'; }, setTimer = setTimeout, clearTimer = clearTimeout, pollMs = 2000,
-  restartLimitMs = 180000, checkMs = 3600000, clock = Date.now }) {
+  restartLimitMs = 180000, checkMs = 300000, clock = Date.now, build = BUILD, doc = globalThis.document }) {
   const scopes = new Map(), mounted = new WeakSet();
-  let epoch = 0, entered = false, timer = null, watching = false;
+  let epoch = 0, entered = false, timer = null, watching = false, lastLoad = -Infinity, listening = false;
 
   function activate() {
     const key = source();
     if (state.updateSettings?.source !== key) {
       epoch += 1; entered = false;
-      if (!scopes.has(key)) scopes.set(key, createUpdateState(key));
+      if (!scopes.has(key)) scopes.set(key, createUpdateState(key, build));
       state.updateSettings = scopes.get(key);
     }
     return state.updateSettings;
@@ -196,6 +214,7 @@ export function createUpdateController({ state, api, source, context, root = () 
   function schedule(callback, delay = pollMs) { clearTimer(timer); timer = setTimer(() => { timer = null; void callback(); }, delay); }
   async function load(refresh = false) {
     const current = activate(), version = epoch;
+    lastLoad = clock();
     current.loading = true; current.error = ''; patch();
     try {
       const payload = await api.getUpdateStatus(refresh, current.source);
@@ -213,7 +232,8 @@ export function createUpdateController({ state, api, source, context, root = () 
     } finally {
       if (version === epoch) {
         current.loading = false; patch();
-        // Between updates, look again every checkMs (the Backend asks GitHub at most hourly).
+        // Between updates, look again every checkMs. The Backend answers from its last check and asks GitHub at most
+        // hourly, so this mainly notices an update another tab finished.
         if (watching && !timer && !current.restarting) schedule(() => load(false), checkMs);
       }
     }
@@ -270,6 +290,7 @@ export function createUpdateController({ state, api, source, context, root = () 
   // The sidebar entry: a pending update restarts, a full-package release opens Settings, anything else starts at once.
   function act() {
     const current = activate(), s = current.status;
+    if (reloadNeeded(current)) { reload(); return; }
     if (!s?.supported || current.busy || current.loading) return;
     if (s.pending) void restart();
     else if (s.available && s.compatible === false) openSettings();
@@ -279,8 +300,18 @@ export function createUpdateController({ state, api, source, context, root = () 
   // Leaving Settings only forgets the visit; an update in progress keeps reporting in the sidebar.
   function leave() { entered = false; const current = state.updateSettings; if (current) current.confirming = false; }
   function stop() { epoch += 1; entered = false; watching = false; clearTimer(timer); timer = null; const current = state.updateSettings; if (current) { current.loading = current.busy = false; } }
+  // Coming back to the tab checks at once (at most every 30 s), so an update finished meanwhile is reported right away.
+  function visible() {
+    const current = state.updateSettings;
+    if (watching && doc?.visibilityState === 'visible' && !current?.restarting && !current?.loading && clock() - lastLoad > 30000) void load(false);
+  }
   // Called once the workspace is ready: check now, then every checkMs while the page is open.
-  function watch() { if (watching) return; watching = true; if (!timer) void load(false); }
+  function watch() {
+    if (watching) return;
+    watching = true;
+    if (!listening && doc?.addEventListener) { listening = true; doc.addEventListener('visibilitychange', visible); }
+    if (!timer) void load(false);
+  }
   function mount() {
     activate();
     const page = root();
@@ -305,6 +336,7 @@ export function createUpdateController({ state, api, source, context, root = () 
         else if (button.hasAttribute('data-update-back')) { current.confirming = false; patch(); }
         else if (button.hasAttribute('data-update-confirm')) void start();
         else if (button.hasAttribute('data-update-restart')) void restart();
+        else if (button.hasAttribute('data-update-reload')) reload();
       });
     }
     patch();

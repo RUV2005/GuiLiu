@@ -16,6 +16,7 @@ import assets
 from api_requset import call_bank_agent
 from bank_mail_fields import normalize_fields
 from bank_regex_regression import MAX_GENERATIONS, cached_examples, generate_checked
+from mail_ids import with_aliases
 from zhenze import BankMailRules, atomic_json, is_cash_withdrawal
 
 
@@ -137,7 +138,9 @@ class BankMailProcessor:
     def eligible(self, msgid):
         if not self.db.R_for_DoneList(msgid):
             return False
-        record = self._state().get(msgid, {})
+        # The same mail handled under its other Gmail ID (e.g. sent for review) keeps that outcome.
+        state = self._state()
+        record = next((state[i] for i in with_aliases(msgid) if i in state), {})
         return record.get("status") != "review" and record.get("attempts", 0) < 3 and record.get("retry_at", 0) <= time.time()
 
     def _call(self, operation, payload):
@@ -157,7 +160,10 @@ class BankMailProcessor:
         return True
 
     def _already_recorded(self, msgid):
-        # Exact source identity only; similar amounts or merchants do not prove duplication.
+        # Exact source identity only (this mail under either Gmail ID); similar amounts or merchants do not prove it.
+        return any(self._recorded_as(value) for value in with_aliases(msgid))
+
+    def _recorded_as(self, msgid):
         with closing(sqlite3.connect(self.db.DBname, timeout=10)) as conn:
             queries = (
                 ("SELECT 1 FROM DealingData WHERE msgid=? LIMIT 1", msgid),

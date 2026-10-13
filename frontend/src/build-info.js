@@ -1,7 +1,7 @@
 // Which build is running. The source repos are the development build: the sidebar marks it Beta with the version
 // the next release will carry. Packaging rewrites this file as the release build of the version being published.
-// After publishing a version, set `version` here to the one after it (0.1.0-rc.13 published -> 0.1.0-rc.14).
-export const BUILD = Object.freeze({ channel: 'release', version: "0.1.0-rc.14" });
+// After publishing a version, set `version` here to the one after it (0.1.0-rc.14 published -> 0.1.0-rc.15).
+export const BUILD = Object.freeze({ channel: 'release', version: "0.1.0-rc.15" });
 
 export const isBetaBuild = (build = BUILD) => build.channel === 'beta';
 // The browser tab says which build it is: GUILIU, or GUILIU beta for the development build.

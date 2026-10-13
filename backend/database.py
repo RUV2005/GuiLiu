@@ -4,6 +4,7 @@ import hashlib
 import json
 import time
 from contextlib import closing
+from mail_ids import with_aliases
 from datetime import datetime
 import assets
 from pyasn1_modules.rfc2459 import SubjectAltName
@@ -275,14 +276,14 @@ class DBmanage :
         return row
 
     def R_for_DoneList(self,MsgID):
+        # A Gmail mail done under its other ID (Google sign-in or app password) is done too.
+        ids = with_aliases(MsgID)
         conn = sqlite3.connect(self.DBname)
         cursor = conn.cursor()
         try:
             cursor.execute(
-                """
-            SELECT 1 FROM DoneList WHERE MsgID = ? LIMIT 1
-            """,
-                (MsgID,)
+                "SELECT 1 FROM DoneList WHERE MsgID IN (" + ",".join("?" * len(ids)) + ") LIMIT 1",
+                ids
             )
             conn.commit()
             row = cursor.fetchone()
@@ -332,14 +333,13 @@ class DBmanage :
 
     def R_for_ADRVectorDoneList(self, MsgID):
         self.ensure_ADRVectorDoneList()
+        ids = with_aliases(MsgID)
         conn = sqlite3.connect(self.DBname)
         cursor = conn.cursor()
         try:
             cursor.execute(
-                """
-                SELECT 1 FROM ADRVectorDoneList WHERE MsgID = ? LIMIT 1
-                """,
-                (MsgID,)
+                "SELECT 1 FROM ADRVectorDoneList WHERE MsgID IN (" + ",".join("?" * len(ids)) + ") LIMIT 1",
+                ids
             )
             row = cursor.fetchone()
             return row is None
@@ -378,8 +378,10 @@ class DBmanage :
 
     def R_for_OCRDoneList(self, source_id):
         self.ensure_OCRDoneList()
+        ids = with_aliases(source_id)
         with sqlite3.connect(self.DBname) as conn:
-            row = conn.execute("SELECT ImagePath FROM OCRDoneList WHERE SourceID = ?", (source_id,)).fetchone()
+            row = conn.execute("SELECT ImagePath FROM OCRDoneList WHERE SourceID IN (" + ",".join("?" * len(ids)) + ") LIMIT 1",
+                               ids).fetchone()
         return None if row is None else {"SourceID": source_id, "ImagePath": row[0]}
 
     def C_for_OCRDoneList(self, source_id, image_path):
@@ -391,9 +393,10 @@ class DBmanage :
         return 100
 
     def R_for_dealing_source(self, source_id):
+        ids = with_aliases(source_id)
         with sqlite3.connect(self.DBname) as conn:
-            return conn.execute("SELECT DealingNumber FROM DealingData WHERE msgid = ? LIMIT 1",
-                                (source_id,)).fetchone()
+            return conn.execute("SELECT DealingNumber FROM DealingData WHERE msgid IN (" + ",".join("?" * len(ids)) + ") LIMIT 1",
+                                ids).fetchone()
 
     def mark_ocr_bill_done(self, source_id):
         with sqlite3.connect(self.DBname) as conn:
@@ -498,14 +501,12 @@ class DBmanage :
         conn = sqlite3.connect(self.DBname)
         cursor = conn.cursor()
         try:
+            ids = with_aliases(MsgID)
             cursor.execute(
-                """
-                SELECT ADRStatus FROM ADRDoneList WHERE MsgID = ? LIMIT 1
-                """,
-                (MsgID,)
+                "SELECT ADRStatus FROM ADRDoneList WHERE MsgID IN (" + ",".join("?" * len(ids)) + ")",
+                ids
             )
-            row = cursor.fetchone()
-            return row is None or row[0] == "downloaded"
+            return all(status == "downloaded" for (status,) in cursor.fetchall())
         except Exception as e:
             print(f"Error occurred: {e}")
             return False

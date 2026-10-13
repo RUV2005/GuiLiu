@@ -22,6 +22,7 @@ from itertools import zip_longest
 from filelock import FileLock
 from google.auth.exceptions import RefreshError
 from Gmail_Manage import gmailM
+import mail_ids
 from runtime_settings import server_data_path
 from zhenze import atomic_json
 
@@ -235,6 +236,12 @@ class ImapMail:
     def get_all_msgid(self, *, stop_event=None, label_ids=None, **kwargs):
         raise NotImplementedError
 
+    def _listed(self, connection, slug, uids):
+        """Called with the UIDs one folder listed."""
+
+    def _cache_name(self, msgid, slug, validity, uid):
+        return str(msgid)
+
     @staticmethod
     def _arrivals(connection, uids):
         """INTERNALDATE (arrival time) per UID in the open folder, to order mail from several folders newest first."""
@@ -310,6 +317,7 @@ class ImapMail:
             if status != "OK":
                 raise MailAccessError(self.ERRORS["search"])
             uids = {int(uid) for uid in (result[0] or b"").split()}
+            self._listed(connection, slug, uids)
             if filters and uids:
                 uids, arrivals = self._local_filter(connection, slug, uids, filters, whole_folder=not terms)
             else:
@@ -337,8 +345,9 @@ class ImapMail:
 
     def _message(self, msgid):
         slug, validity, uid = self._parts(msgid)
-        path = server_data_path("mail/cache/" + str(msgid) + ".eml")
-        with gmailM.image_lock("mail:" + str(msgid)):
+        name = self._cache_name(msgid, slug, validity, uid)
+        path = server_data_path("mail/cache/" + name + ".eml")
+        with gmailM.image_lock("mail:" + name):
             if path.is_file():
                 raw = path.read_bytes()
             else:
@@ -671,6 +680,21 @@ class NetEaseMail(ImapMail):
         return self._ids(stop_event=stop_event)
 
 
+def uid_set(uids):
+    """An IMAP UID set for sorted UIDs, runs folded: 1:3,7,9:12."""
+    parts, start, end = [], None, None
+    for uid in uids:
+        if start is not None and uid == end + 1:
+            end = uid
+            continue
+        if start is not None:
+            parts.append(str(start) if start == end else f"{start}:{end}")
+        start = end = uid
+    if start is not None:
+        parts.append(str(start) if start == end else f"{start}:{end}")
+    return ",".join(parts)
+
+
 class GmailImap(ImapMail):
     """Gmail over IMAP with an app password, for deployments without their own Google OAuth app.
 
@@ -729,9 +753,50 @@ class GmailImap(ImapMail):
 
     def _parts(self, msgid):
         match = self.PATTERN.fullmatch(str(msgid))
-        if not match or match[1] != self.key:
-            raise MailAccessError(self.ERRORS["foreign"])
-        return "all", match[2], match[3]
+        if match and match[1] == self.key:
+            return "all", match[2], match[3]
+        # A Gmail ID, as Google sign-in recorded the mail: find its UID in this mailbox.
+        if not match and mail_ids.API_ID.fullmatch(str(msgid)):
+            uid = self._uid_for(str(msgid))
+            if uid is not None:
+                return "all", self.validity, uid
+        raise MailAccessError(self.ERRORS["foreign"])
+
+    def _uid_for(self, api_id):
+        connection = self.connect()
+        uid = mail_ids.uid_for(self.key, self.validity, api_id)
+        if uid is None:
+            status, result = connection.uid("SEARCH", "X-GM-MSGID", str(int(api_id, 16)))
+            found = (result[0] or b"").split() if status == "OK" and result else []
+            if len(found) != 1:
+                return None
+            uid = found[0].decode("ascii")
+            mail_ids.remember(self.key, self.validity, {uid: api_id})
+        return str(uid)
+
+    def _cache_name(self, msgid, slug, validity, uid):
+        # One cached copy per mail, whichever ID it was read by.
+        return f"gimap_{self.key}_{validity}_{uid}"
+
+    def _listed(self, connection, slug, uids):
+        """Note Gmail's own ID (X-GM-MSGID, in hex as the Gmail API writes it) of every listed mail, once per
+        mail: done lists then match a mail recorded under Google sign-in. Without it nothing is lost but that match."""
+        noted = mail_ids.known(self.key, self.validity)
+        missing = sorted(uid for uid in uids if str(uid) not in noted)
+        pairs = {}
+        try:
+            for start in range(0, len(missing), 1000):
+                chunk = missing[start:start + 1000]
+                status, rows = connection.uid("FETCH", uid_set(chunk), "(X-GM-MSGID)")
+                wanted = set(chunk)
+                for row in rows if status == "OK" and rows else []:
+                    line = row if isinstance(row, bytes) else b""
+                    uid, gmail = re.search(rb"UID (\d+)", line), re.search(rb"X-GM-MSGID (\d+)", line)
+                    if uid and gmail and int(uid[1]) in wanted:
+                        pairs[int(uid[1])] = format(int(gmail[1]), "x")
+        except (imaplib.IMAP4.error, OSError) as error:
+            log.warning("Gmail IDs of listed mail could not be read: %s", type(error).__name__)
+        mail_ids.remember(self.key, self.validity, pairs)
 
     def _source_id(self, uid, slug="all"):
         return f"gimap_{self.key}_{self.validity}_{uid}"
