@@ -118,6 +118,15 @@ def initialize_agent_database(path=None, *, legacy_paths=None):
                     continue
                 if db.execute("SELECT 1 FROM AgentDatabaseMigration WHERE source_path=?", (key,)).fetchone():
                     continue
+                # The data folder moved (a copied or relocated install): the same store was merged under its old path
+                # and has not changed since, so record the new path instead of merging it a second time.
+                earlier = next((row for row in db.execute("SELECT source_path, migrated_at, row_counts FROM AgentDatabaseMigration")
+                                if Path(row[0]).name == path.name.casefold()), None)
+                if earlier and path.stat().st_mtime <= datetime.fromisoformat(earlier[1]).timestamp():
+                    db.execute("INSERT INTO AgentDatabaseMigration VALUES (?,?,?,?)", (
+                        key, datetime.now(timezone.utc).isoformat(), earlier[2], "already merged as " + earlier[0]))
+                    db.commit()
+                    continue
                 memory = sqlite3.connect(":memory:")
                 snapshots.append((kind, key, memory))
                 with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=30)) as old:
