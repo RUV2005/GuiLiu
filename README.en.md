@@ -153,3 +153,14 @@ The original code is released under the MIT License, © 2026 rhinoqvq; see [LICE
 - Photo on the service-unavailable screen: Michal Jarmoluk, CC0 (via Pixnio)
 
 Gmail, 163, OpenAI, Qwen and other names and logos belong to their respective owners. They are used here only to identify the services GUILIU connects to; GUILIU is not affiliated with these companies.
+
+## Features
+
+- **Automatic statement capture**: reads bank spending notifications in Gmail or NetEase 163 Mail (both can be connected at once), extracts merchant, amount, currency and time with rules and a large language model, then categorizes, deduplicates and records them. Recognition rules are generated per sender automatically, with no built-in list of banks.
+- **Receipt and statement import**: receipts or payment screenshots sent to your mailbox are recognized and recorded. Alipay and WeChat Pay statements (CSV / Excel) can be imported with an editable preview; suspected duplicates are written only after you confirm them.
+- **Detail enrichment (ADR)**: for each bank charge, finds evidence in emails and receipts and attaches the item details under the original transaction, without counting the spending twice.
+- **Report-style overview**: a one-sentence briefing, a day-by-day comparison of this month with last month, category drivers and a full-year calendar heatmap, switchable by date, account and main currency (JPY / CNY).
+- **Assets and accounts**: bank, cash and credit accounts, with net worth and balance trends converted across currencies.
+- **An Agent that analyzes**: ask in natural language and get conclusions, key figures, related transactions and chart reports, with multi-turn conversations, web search and a personal preference profile.
+- **Goals, automations and Agent insights**: savings and investment plans with progress, recurring automated tasks, and findings and questions raised by the Agent.
+- Chinese, Japanese and English interface; light and dark themes.
