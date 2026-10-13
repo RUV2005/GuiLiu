@@ -1,5 +1,4 @@
 export const IMPORT_LIMITS = { bytes: 10 * 1024 * 1024 };
-export const IMPORT_PAGE_SIZE = 50;
 export const IMPORT_BATCH_SIZE = 100;
 export const IMPORT_EDIT_FIELDS = ['shop_name', 'main_category', 'sub_category', 'detail_category'];
 export const IMPORT_FIELDS = ['shop_name', 'product_name', 'price', 'isotime', 'main_category', 'sub_category', 'detail_category'];
@@ -28,7 +27,7 @@ export function createImportState() {
     busy: '', rowsLoading: false, error: '', notice: '', conflict: false, confirming: false,
     pendingCommit: null, completedBatches: 0, pollingError: '',
     presetOpen: false, presetText: '', presetDirty: false, savePreset: false, mappingFor: '',
-    advancedOpen: false, payment: null,
+    advancedOpen: false, payment: null, importFilter: defaultImportFilter(), unchecked: new Set(), shown: IMPORT_SHOWN_STEP, noticeVars: null,
   };
 }
 export function validateImportFile(file) {
@@ -83,10 +82,6 @@ export function buildImportChoices(state) {
   }
   return choices.map(choice => ({ ...choice }));
 }
-export function importSelection(state) {
-  const values = [...state.choices.values()];
-  return { total: values.length, imports: values.filter(row => row.action === 'import').length, skips: values.filter(row => row.action === 'skip').length };
-}
 export function planImportBatches(state) {
   const choices = buildImportChoices(state), terminal = [], others = [];
   for (const choice of choices) {
@@ -99,10 +94,6 @@ export function planImportBatches(state) {
   const ordered = [...others, ...terminal], batches = [];
   for (let offset = 0; offset < ordered.length; offset += IMPORT_BATCH_SIZE) batches.push(ordered.slice(offset, offset + IMPORT_BATCH_SIZE));
   return batches;
-}
-export function visibleImportRows(state) {
-  const q = state.query.trim().toLowerCase();
-  return !q ? state.rows : state.rows.filter(row => [row.row_id, ...Object.values(row.normalized || {})].some(value => String(value ?? '').toLowerCase().includes(q)));
 }
 export function presetTemplate(extension = '.csv') {
   return { preset_id: 'custom_import_v1', name: 'Custom import', provider: 'custom', version: 1, extensions: [extension],
@@ -117,8 +108,45 @@ export function parseImportPreset(value) {
   if (!preset || typeof preset !== 'object' || Array.isArray(preset) || !/^[a-z][a-z0-9_]{0,63}$/.test(preset.preset_id || '') || !preset.columns || typeof preset.columns !== 'object' || Array.isArray(preset.columns)) throw new Error('presetInvalid');
   return preset;
 }
-// The review page groups rows the way people think about them; the Backend counts and filters by the same groups.
+// The review page groups rows the way people think about them; the Backend counts by the same groups.
 export const IMPORT_GROUPS = ['ready', 'attention', 'existing', 'excluded', 'done'];
+export const IMPORT_SHOWN_STEP = 200;
+export function rowGroup(row) {
+  const state = rowStatus(row);
+  if (['imported', 'skipped'].includes(state)) return 'done';
+  if (state === 'duplicate') return 'existing';
+  if (state === 'excluded') return 'excluded';
+  return state === 'new' && !missingClassification(row) && !needsIncomeConfirmation(row) ? 'ready' : 'attention';
+}
+// The filter bar: which groups to show, expense/income, payment methods and file types (null = all), dates, text.
+export function defaultImportFilter() {
+  return { groups: new Set(['ready', 'attention']), kinds: new Set(['expense', 'income']), payments: null, types: null, from: '', to: '', query: '' };
+}
+export const IMPORT_FACETS = {
+  groups: rowGroup,
+  kinds: row => isIncomeRow(row) ? 'income' : 'expense',
+  payments: row => String(row.normalized?.payment_method || ''),
+  types: row => String(row.normalized?.transaction_type || ''),
+};
+export function matchesFilter(row, filter, except = '') {
+  for (const [facet, keyOf] of Object.entries(IMPORT_FACETS)) {
+    if (facet !== except && filter[facet] && !filter[facet].has(keyOf(row))) return false;
+  }
+  const day = String(row.normalized?.isotime || '').slice(0, 10);
+  if (day && ((filter.from && day < filter.from) || (filter.to && day > filter.to))) return false;
+  const q = filter.query.trim().toLowerCase();
+  return !q || [row.row_id, ...Object.values(row.normalized || {})].some(value => String(value ?? '').toLowerCase().includes(q));
+}
+// For each choice of one facet, how many rows the other filters leave: what ticking that choice would show.
+export function facetCounts(rows, filter, facet) {
+  const counts = new Map();
+  for (const row of rows) if (matchesFilter(row, filter, facet)) counts.set(IMPORT_FACETS[facet](row), (counts.get(IMPORT_FACETS[facet](row)) || 0) + 1);
+  return counts;
+}
+export const filteredRows = state => state.rows.filter(row => matchesFilter(row, state.importFilter));
+export const importableRow = (state, row) => canImportRow(row, state.distinct.has(row.row_id), state.externalIncome.has(row.row_id));
+// What will be imported: every row the filters show that can be imported, except the ones unticked by hand.
+export const selectedRows = state => filteredRows(state).filter(row => importableRow(state, row) && !state.unchecked.has(row.row_id));
 export function groupCounts(job) {
   if (job?.groups) return Object.fromEntries(IMPORT_GROUPS.map(group => [group, Number(job.groups[group] || 0)]));
   // A task saved before groups existed: estimate them from the row states.
@@ -126,17 +154,6 @@ export function groupCounts(job) {
   return { ready: n('new'), attention: n('needs_review') + n('suspected_duplicate') + n('invalid') + n('failed'),
     existing: n('duplicate'), excluded: n('excluded'), done: n('imported') + n('skipped') };
 }
-// Open the group that needs the user first: rows to import, then rows to look at, then whatever the file holds.
-export function defaultGroup(job) {
-  const counts = groupCounts(job);
-  return ['ready', 'attention', 'existing', 'excluded', 'done'].find(group => counts[group]) || 'ready';
-}
-export const activeGroup = state => state.filter.startsWith('group:') ? state.filter.slice(6) : '';
-// Payment methods in a group, most rows first ('' is a row without one).
-export function paymentMethods(job, group) {
-  return Object.entries(job?.payment_methods?.[group] || {}).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
-}
-export const paymentQuery = payment => payment === null ? null : payment === '' ? '__none__' : payment;
 const ISSUE_NOTES = { refund_requires_review: 'noteRefund', payment_requires_review: 'notePayment', account_currency_mismatch: 'account_currency_mismatch',
   conflicting_rows_with_same_identity: 'conflicting_rows_with_same_identity', row_processing_failed: 'row_processing_failed' };
 // Why a row is where it is, in plain words (keys of the import copy; vars fill them in).

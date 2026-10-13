@@ -1,5 +1,5 @@
-import { IMPORT_EDIT_FIELDS, editableImport, canEditImportRow, canImportRow, rowDone, selectImportRow,
-  visibleImportRows, buildImportChoices, presetTemplate, parseImportPreset } from './import-model.js';
+import { IMPORT_EDIT_FIELDS, IMPORT_FACETS, IMPORT_SHOWN_STEP, editableImport, canEditImportRow, selectImportRow,
+  presetTemplate, parseImportPreset, defaultImportFilter, filteredRows, importableRow, selectedRows } from './import-model.js';
 import { importParts, importText } from './import-view.js';
 import { createImportService } from './import-service.js';
 
@@ -15,7 +15,7 @@ export function createImportController({ state, api, source, afterCommit, openIn
     painting = true;
     try {
       const s = current(), active = doc.activeElement;
-      const focusAttribute = ['data-import-field','data-import-form','data-import-query','data-import-preset-text'].find(attr=>active?.hasAttribute(attr));
+      const focusAttribute = ['data-import-field','data-import-form','data-import-query','data-import-date','data-import-preset-text'].find(attr=>active?.hasAttribute(attr));
       const focusKey = focusAttribute ? '[' + focusAttribute + '="' + CSS.escape(active.getAttribute(focusAttribute)) + '"]' : null;
       const selection = active?.selectionStart != null ? [active.selectionStart,active.selectionEnd] : null;
       const scroll = page.querySelector('.import-table-scroll'), position = scroll ? [scroll.scrollTop,scroll.scrollLeft] : null;
@@ -82,14 +82,24 @@ export function createImportController({ state, api, source, afterCommit, openIn
       const id = target.dataset.importDetails;
       s.expanded.has(id) ? s.expanded.delete(id) : s.expanded.add(id); paint(); return;
     }
-    if (target.dataset.importGroup) {
-      s.filter = 'group:' + target.dataset.importGroup; s.rows = []; s.query = ''; s.payment = null; s.confirming = false; paint();
-      return void service.loadRows();
+    // A chip keeps or drops one value of a facet; for payment methods and file types "all" is the starting point.
+    if (target.dataset.importChip) {
+      const facet = target.dataset.importChip, value = target.dataset.value, f = s.importFilter;
+      if (!f[facet]) f[facet] = new Set(s.rows.map(IMPORT_FACETS[facet]));
+      f[facet].has(value) ? f[facet].delete(value) : f[facet].add(value);
+      if (['payments', 'types'].includes(facet) && f[facet].size === new Set(s.rows.map(IMPORT_FACETS[facet])).size) f[facet] = null;
+      s.shown = IMPORT_SHOWN_STEP; s.notice = ''; paint(); return;
     }
-    if (action === 'select-all-ready') return void service.selectGroup('ready');
-    if (action === 'import-all') return void (async () => {
-      if (!await service.selectGroup('ready')) return;
-      try { buildImportChoices(s); s.confirming = true; s.error = ''; } catch (e) { s.error = e.message; }
+    if (target.dataset.importChipAll) { s.importFilter[target.dataset.importChipAll] = null; s.shown = IMPORT_SHOWN_STEP; paint(); return; }
+    if (action === 'reset-filters') { s.importFilter = defaultImportFilter(); s.shown = IMPORT_SHOWN_STEP; paint(); return; }
+    if (action === 'show-more') { s.shown += IMPORT_SHOWN_STEP; paint(); return; }
+    // The ticked rows the filters show are imported as they are; nothing else is asked.
+    if (action === 'import-selected') return void (async () => {
+      const rows = selectedRows(s);
+      if (!rows.length || s.busy || s.editor) return;
+      s.choices.clear();
+      for (const row of rows) selectImportRow(s, row, 'import');
+      if (await service.commit()) { s.notice = 'importedRows'; s.noticeVars = { count: rows.length }; s.unchecked.clear(); }
       paint();
     })();
     if (action === 'switch-account') return void service.switchAccount(target.dataset.account);
@@ -97,7 +107,6 @@ export function createImportController({ state, api, source, afterCommit, openIn
     if (action === 'upload') return void service.upload();
     if (action === 'setup') return void service.setup(true);
     if (action === 'refresh') return void service.poll(true);
-    if (action === 'more') return void service.loadRows(true);
     if (action === 'save-row') return void service.saveEditor();
     if (action === 'cancel-edit') { s.editor = null; s.error = ''; paint(); return; }
     if (action === 'presets') {
@@ -110,21 +119,6 @@ export function createImportController({ state, api, source, afterCommit, openIn
       try { download(parseImportPreset(s.presetText)); } catch (e) { error(e.message); } return;
     }
     if (action === 'save-preset' || action === 'map') return void service.savePreset(action === 'map');
-    if (action === 'clear-selection') { s.choices.clear(); s.confirming = false; paint(); return; }
-    if (action === 'select-new' || action === 'skip-visible') {
-      for (const row of visibleImportRows(s)) {
-        if (rowDone(row)) continue;
-        if (action === 'skip-visible') selectImportRow(s,row,'skip');
-        else if (canImportRow(row,s.distinct.has(row.row_id),s.externalIncome.has(row.row_id))) selectImportRow(s,row,'import');
-      }
-      paint(); return;
-    }
-    if (action === 'confirm') {
-      try { buildImportChoices(s); s.confirming = true; s.error = ''; } catch (e) { s.error = e.message; }
-      paint(); return;
-    }
-    if (action === 'back-review') { s.confirming = false; paint(); return; }
-    if (action === 'commit' && s.confirming) return void service.commit();
     if (action === 'retry-commit') return void service.commit(true);
   });
   doc.addEventListener('input',event=>{
@@ -133,7 +127,7 @@ export function createImportController({ state, api, source, afterCommit, openIn
     const s = current();
     if (target.hasAttribute('data-import-field') && s.editor) s.editor.draft[target.dataset.importField] = target.value;
     if (target.hasAttribute('data-import-form') && target.type !== 'checkbox') s.form[target.dataset.importForm] = target.value;
-    if (target.hasAttribute('data-import-query')) { s.query = target.value; paint(); }
+    if (target.hasAttribute('data-import-query')) { s.importFilter.query = target.value; s.shown = IMPORT_SHOWN_STEP; paint(); }
     if (target.hasAttribute('data-import-preset-text')) { s.presetText = target.value; s.presetDirty = true; }
   });
   doc.addEventListener('change',async event=>{
@@ -160,13 +154,12 @@ export function createImportController({ state, api, source, afterCommit, openIn
     }
     if (target.hasAttribute('data-import-preset-load')) { s.presetDirty = false; await service.selectPreset(target.value); return; }
     if (target.hasAttribute('data-import-save-preset')) { s.savePreset = target.checked; return; }
+    if (target.hasAttribute('data-import-date')) { s.importFilter[target.dataset.importDate] = target.value; s.shown = IMPORT_SHOWN_STEP; paint(); return; }
+    // The header box ticks or unticks every importable row the filters show.
     if (target.hasAttribute('data-import-select-all')) {
-      if (target.checked) await service.selectGroup('ready');
-      else { s.choices.clear(); s.confirming = false; }
+      for (const row of filteredRows(s)) if (importableRow(s, row)) target.checked ? s.unchecked.delete(row.row_id) : s.unchecked.add(row.row_id);
       paint(); return;
     }
-    if (target.hasAttribute('data-import-payment')) { s.payment = target.value === '*' ? null : target.value; s.rows = []; s.query = ''; s.choices.clear(); s.confirming = false; await service.loadRows(); return; }
-    if (target.hasAttribute('data-import-filter')) { s.filter = target.value; s.rows = []; s.query = ''; s.confirming = false; await service.loadRows(); return; }
     if (target.hasAttribute('data-import-distinct')) {
       const id = target.dataset.importDistinct;
       if (target.checked) s.distinct.add(id);
@@ -179,13 +172,12 @@ export function createImportController({ state, api, source, afterCommit, openIn
       else { s.externalIncome.delete(id); if (s.choices.get(id)?.action === 'import') s.choices.delete(id); }
       s.confirming = false; paint(); return;
     }
+    // Rows are ticked by default; an untick keeps that one row out of the import.
     if (target.hasAttribute('data-import-select')) {
-      const row = s.rowCache.get(target.dataset.importSelect);
-      // A tick means "import this row"; rows left unticked are simply not imported.
-      selectImportRow(s,row,target.checked && canImportRow(row,s.distinct.has(row.row_id),s.externalIncome.has(row.row_id)) ? 'import' : '');
+      const id = target.dataset.importSelect;
+      target.checked ? s.unchecked.delete(id) : s.unchecked.add(id);
       paint(); return;
     }
-    if (target.hasAttribute('data-import-decision')) { selectImportRow(s,s.rowCache.get(target.dataset.importDecision),target.value); paint(); }
   });
   doc.addEventListener('keydown',event=>{
     if (!event.target.matches?.('[data-import-field]') || event.isComposing) return;

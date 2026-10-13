@@ -1,9 +1,9 @@
 import { escapeHtml as h, escapeAttr as a } from './utils.js';
 import { accountOptions } from './assets-view.js';
 import { financeAttr } from './finance-colors.js';
-import { IMPORT_EDIT_FIELDS, IMPORT_GROUPS, editableImport, processingImport, rowDone, missingClassification, canImportRow,
-  canEditImportRow, currencyLabel, importSelection, visibleImportRows, isIncomeRow, needsIncomeConfirmation, groupCounts,
-  activeGroup, rowReasons, rowStatus, paymentMethods } from './import-model.js';
+import { IMPORT_EDIT_FIELDS, IMPORT_GROUPS, IMPORT_FACETS, editableImport, processingImport, rowDone, missingClassification,
+  canEditImportRow, currencyLabel, isIncomeRow, needsIncomeConfirmation, groupCounts, rowGroup, rowReasons, rowStatus,
+  facetCounts, filteredRows, importableRow, selectedRows, defaultImportFilter } from './import-model.js';
 
 export const importFieldKey = field => 'import' + field[0].toUpperCase() + field.slice(1);
 export const importText = (ctx, key, vars) => {
@@ -17,7 +17,7 @@ const opts = (values, selected) => values.map(([value, label]) =>
 const textValue = value => typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
 const amountText = row => (isIncomeRow(row) ? '+' : '-') + String(row.normalized?.price ?? '') + ' ' + currencyLabel(row.normalized?.CurrencyTypeNumber);
 const locked = s => Boolean(s.busy || s.pendingCommit || s.editor || s.rowsLoading || !editableImport(s.job) || s.rowsRevision !== s.job?.revision);
-const notice = (ctx, value, error = false) => value ? `<p class="import-notice${error ? ' is-error' : ''}" role="${error ? 'alert' : 'status'}">${h(importText(ctx, value))}</p>` : '';
+const notice = (ctx, value, error = false, vars) => value ? `<p class="import-notice${error ? ' is-error' : ''}" role="${error ? 'alert' : 'status'}">${h(importText(ctx, value, vars))}</p>` : '';
 const reviewing = job => job && !processingImport(job.state) && job.state !== 'mapping_required';
 
 function accountName(ctx, number) {
@@ -99,20 +99,17 @@ function mapping(ctx) {
     ${isMapping ? `<label class="import-check"><input type="checkbox" data-import-save-preset${s.savePreset ? ' checked' : ''}${disabled ? ' disabled' : ''}/>${h(t('saveForLater'))}</label>` : ''}
     ${button(isMapping ? 'map' : 'save-preset', t(s.busy === 'mapping' ? 'parsing' : isMapping ? 'applyMapping' : 'savePreset'), disabled, true)}</div></section>`;
 }
-// The file in one sentence, then one card per group; a card filters the list below.
+// The file in one sentence; the filter bar below decides what is shown and imported.
 function summary(ctx) {
   const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars), job = s.job;
   if (!reviewing(job)) return '';
-  const counts = groupCounts(job), group = activeGroup(s);
+  const counts = s.rows.length ? Object.fromEntries(IMPORT_GROUPS.map(group => [group, s.rows.filter(row => rowGroup(row) === group).length])) : groupCounts(job);
   const parts = IMPORT_GROUPS.filter(name => counts[name]).map(name => t('sum_' + name, { count: counts[name] }));
   const sentence = t('sumTotal', { total: job.total }) + parts.join(t('listSeparator')) + t('sumEnd');
   const nothing = !counts.ready && !counts.attention ? `<p class="import-nothing">${h(t(counts.done ? 'allHandled' : 'nothingNew'))}</p>` : '';
-  const cards = IMPORT_GROUPS.filter(name => counts[name]).map(name => `<button type="button" class="import-group is-${name}${group === name ? ' is-active' : ''}" data-import-group="${name}" aria-pressed="${group === name}"${s.editor || s.busy ? ' disabled' : ''}>
-    <strong>${h(counts[name])}</strong><span>${h(t('group_' + name))}</span><small>${h(t('groupHint_' + name))}</small></button>`).join('');
   const c = job.classification, classified = c && c.memory + c.model + c.user > 0
     ? `<p class="import-classified${c.open ? ' has-open' : ''}" role="status">${h(t('classifiedSummary', c))}</p>` : '';
-  return `<p class="import-sentence" role="status">${h(sentence)}</p>${nothing}${accountHint(ctx)}
-    <div class="import-groups" role="group" aria-label="${a(t('groupsLabel'))}">${cards}</div>${classified}`;
+  return `<p class="import-sentence" role="status">${h(sentence)}</p>${nothing}${accountHint(ctx)}${classified}`;
 }
 // Rows imported before into another account usually mean the wrong account was chosen for this file.
 function accountHint(ctx) {
@@ -123,24 +120,47 @@ function accountHint(ctx) {
   return `<div class="import-account-hint" role="status"><p>${h(t('otherAccountHint', { count, other: name, current: accountName(ctx, s.job.account_number) }))}</p>
     ${other ? button('switch-account', t('useOtherAccount', { account: name }), Boolean(s.busy || s.pendingCommit || s.editor), true, '', ` data-account="${a(number)}"`) : ''}</div>`;
 }
-function controls(ctx) {
-  const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars);
-  if (!reviewing(s.job)) return '';
-  const group = activeGroup(s), counts = groupCounts(s.job);
-  if (!counts[group]) return '';
-  const disabled = Boolean(s.editor || s.busy || s.pendingCommit);
-  return `<div class="import-toolbar"><div><h2>${h(t('group_' + group))}</h2><p>${h(t('groupHint_' + group))}</p></div><div class="import-tools">
-    ${paymentFilter(ctx, group, disabled)}
-    <input type="search" data-import-query value="${a(s.query)}" placeholder="${a(t('search'))}" aria-label="${a(t('search'))}"${disabled ? ' disabled' : ''}/>
-    </div></div>`;
+const sameSet = (a, b) => a.size === b.size && [...a].every(value => b.has(value));
+function filtersChanged(f) {
+  const d = defaultImportFilter();
+  return !sameSet(f.groups, d.groups) || !sameSet(f.kinds, d.kinds) || f.payments || f.types || f.from || f.to || f.query.trim();
 }
-// A file can mix payment methods (Huabei, a balance, a bank card); each can be looked at and imported on its own.
-function paymentFilter(ctx, group, disabled) {
-  const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars), methods = paymentMethods(s.job, group);
-  if (methods.length < 2) return '';
-  const total = methods.reduce((sum, [, count]) => sum + count, 0);
-  return `<select data-import-payment aria-label="${a(t('paymentFilter'))}"${disabled ? ' disabled' : ''}>${opts([['*', t('allPayments', { count: total })],
-    ...methods.map(([method, count]) => [method, (method || t('noPayment')) + ' (' + count + ')'])], s.payment === null ? '*' : s.payment)}</select>`;
+// What to keep: groups, expense/income, payment methods and the file's own types, then dates and text. Each choice
+// shows how many rows it would add with the other filters as they are.
+function filters(ctx) {
+  const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars), f = s.importFilter;
+  if (!reviewing(s.job)) return '';
+  if (!s.rows.length) return s.rowsLoading ? notice(ctx, 'loading') : '';
+  const off = s.editor || s.busy || s.pendingCommit ? ' disabled' : '';
+  const chip = (facet, value, label, count) => {
+    const on = !f[facet] || f[facet].has(value);
+    return `<button type="button" class="import-chip${on ? ' is-on' : ''}" data-import-chip="${facet}" data-value="${a(value)}" aria-pressed="${on}"${off}>${h(label)}<span>${h(count)}</span></button>`;
+  };
+  const row = (label, chips, extra = '') => `<div class="import-filter-row" role="group" aria-label="${a(label)}"><span class="import-filter-label">${h(label)}</span><div class="import-chips">${chips}${extra}</div></div>`;
+  const groups = facetCounts(s.rows, f, 'groups');
+  const groupChips = IMPORT_GROUPS.filter(group => s.rows.some(item => rowGroup(item) === group)).map(group => chip('groups', group, t('group_' + group), groups.get(group) || 0)).join('');
+  const kinds = facetCounts(s.rows, f, 'kinds'), present = ['expense', 'income'].filter(kind => kinds.get(kind) || !f.kinds.has(kind));
+  const many = (facet, label) => {
+    const values = [...new Set(s.rows.map(IMPORT_FACETS[facet]))];
+    if (values.length < 2) return '';
+    const counts = facetCounts(s.rows, f, facet);
+    values.sort((x, y) => (counts.get(y) || 0) - (counts.get(x) || 0) || x.localeCompare(y));
+    // A choice with nothing left to show is hidden unless the user turned it off (so it can be turned back on).
+    const visible = values.filter(value => counts.get(value) || (f[facet] && !f[facet].has(value)));
+    if (visible.length < 2 && !f[facet]) return '';
+    return row(label, visible.map(value => chip(facet, value, value || t('noPayment'), counts.get(value) || 0)).join(''),
+      f[facet] ? `<button type="button" class="text-button" data-import-chip-all="${facet}"${off}>${h(t('filterAll'))}</button>` : '');
+  };
+  return `<section class="import-filters" aria-label="${a(t('filtersLabel'))}">
+    ${row(t('filterShow'), groupChips)}
+    ${present.length > 1 ? row(t('filterKind'), present.map(kind => chip('kinds', kind, t(kind), kinds.get(kind) || 0)).join('')) : ''}
+    ${many('payments', t('paymentFilter'))}
+    ${many('types', t('filterType'))}
+    <div class="import-filter-row"><span class="import-filter-label">${h(t('filterTime'))}</span><div class="import-filter-inputs">
+      <input type="date" data-import-date="from" value="${a(f.from)}" aria-label="${a(t('dateFrom'))}"${off}/><span aria-hidden="true">–</span><input type="date" data-import-date="to" value="${a(f.to)}" aria-label="${a(t('dateTo'))}"${off}/>
+      <input type="search" data-import-query value="${a(f.query)}" placeholder="${a(t('search'))}" aria-label="${a(t('search'))}"${off}/>
+      ${filtersChanged(f) ? `<button type="button" class="text-button" data-import-action="reset-filters"${off}>${h(t('resetFilters'))}</button>` : ''}</div></div>
+  </section>`;
 }
 function reasons(ctx, row) {
   const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars);
@@ -183,15 +203,14 @@ function rowDetails(ctx, row) {
 }
 function rowMarkup(ctx, row, disabled) {
   const s = ctx.state.importData, t = key => importText(ctx, key), id = row.row_id, n = row.normalized || {};
-  const editing = s.editor?.id === id, selected = s.choices.get(id)?.action === 'import';
-  const importable = canImportRow(row, s.distinct.has(id), s.externalIncome.has(id));
+  const editing = s.editor?.id === id, importable = importableRow(s, row);
   const editable = canEditImportRow(row) && editableImport(s.job);
   const trigger = (field, value, missing = false) => `<button type="button" class="import-cell-trigger${missing ? ' is-missing' : ''}" data-import-cell="${field}" data-import-id="${a(id)}"${locked(s) ? ' disabled' : ''}>${h(value)}</button>`;
   const category = [n.main_category, n.sub_category].filter(Boolean).join(' · ');
   const categoryCell = isIncomeRow(row) ? h(t('income')) : editable ? trigger('main_category', category || t('pickCategory'), missingClassification(row)) : h(category || '—');
   const time = String(n.isotime || '');
-  return `<tr data-import-row="${a(id)}" class="${editing ? 'is-editing' : ''}">
-    <td>${importable || selected ? `<input type="checkbox" data-import-select="${a(id)}" aria-label="${a(t('selectRow'))}"${selected ? ' checked' : ''}${disabled || rowDone(row) ? ' disabled' : ''}/>` : ''}</td>
+  return `<tr data-import-row="${a(id)}" class="${editing ? 'is-editing' : ''}${importable && s.unchecked.has(id) ? ' is-unticked' : ''}">
+    <td>${importable ? `<input type="checkbox" data-import-select="${a(id)}" aria-label="${a(t('selectRow'))}"${s.unchecked.has(id) ? '' : ' checked'}${disabled ? ' disabled' : ''}/>` : ''}</td>
     <td class="import-cell-isotime">${time ? `<time datetime="${a(time)}"><span>${h(time.slice(0, 10))}</span><small>${h(time.slice(11, 16))}</small></time>` : '—'}</td>
     <td class="import-cell-merchant">${editable ? trigger('shop_name', n.shop_name || '—') : `<strong>${h(n.shop_name || '—')}</strong>`}<small>${h(n.product_name || '')}</small></td>
     <td class="import-cell-price"${financeAttr((isIncomeRow(row) ? '' : '-') + n.price, 'amount')}>${h(amountText(row))}</td>
@@ -202,41 +221,35 @@ function rowMarkup(ctx, row, disabled) {
 }
 function table(ctx) {
   const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars);
-  if (!reviewing(s.job) || !groupCounts(s.job)[activeGroup(s)]) return '';
-  const disabled = locked(s), rows = visibleImportRows(s);
-  // The header box picks every row ready to import (all pages, within the payment filter).
-  const ready = s.payment === null ? groupCounts(s.job).ready : Number(s.job.payment_methods?.ready?.[s.payment] || 0);
-  const all = activeGroup(s) === 'ready' ? `<input type="checkbox" data-import-select-all aria-label="${a(t('selectAll'))}"${ready && importSelection(s).imports >= ready ? ' checked' : ''}${disabled ? ' disabled' : ''}/>` : '';
+  if (!reviewing(s.job) || !s.rows.length) return '';
+  const disabled = locked(s), rows = filteredRows(s), shown = rows.slice(0, s.shown);
+  // The header box ticks or unticks every importable row the filters show, not only the rows drawn so far.
+  const importable = rows.filter(row => importableRow(s, row));
+  const all = importable.length ? `<input type="checkbox" data-import-select-all aria-label="${a(t('selectAll'))}"${importable.every(row => !s.unchecked.has(row.row_id)) ? ' checked' : ''}${disabled ? ' disabled' : ''}/>` : '';
   return `<div class="import-table-scroll" aria-busy="${s.rowsLoading}"><table class="import-table">
     <thead><tr><th aria-label="${a(t('selected'))}">${all}</th><th>${h(t('isotime'))}</th><th>${h(t('merchantProduct'))}</th><th>${h(t('price'))}</th><th>${h(t('category'))}</th><th>${h(t('note'))}</th><th><span class="sr-only">${h(t('actions'))}</span></th></tr></thead>
-    <tbody>${rows.map(row => rowMarkup(ctx, row, disabled)).join('') || '<tr><td colspan="7" class="import-no-match">' + h(t(s.rowsLoading ? 'loading' : 'empty')) + '</td></tr>'}
+    <tbody>${shown.map(row => rowMarkup(ctx, row, disabled)).join('') || '<tr><td colspan="7" class="import-no-match">' + h(t(s.rowsLoading ? 'loading' : 'noMatch')) + '</td></tr>'}
     </tbody></table></div>
-    <div class="import-table-end"><span>${h(t('showing', { shown: s.rows.length, total: s.total }))}</span>
-    ${s.nextOffset !== null ? button('more', t(s.rowsLoading ? 'loading' : 'more'), Boolean(s.rowsLoading || s.editor || s.busy || s.pendingCommit)) : ''}</div>`;
+    <div class="import-table-end"><span>${h(t('showingFiltered', { shown: shown.length, total: rows.length, all: s.rows.length }))}</span>
+    ${rows.length > shown.length ? button('show-more', t('showMore', { count: Math.min(rows.length - shown.length, 200) }), Boolean(s.editor || s.busy)) : ''}</div>`;
 }
-// One clear action at the bottom: import everything ready, or the rows picked by hand.
+// One action: import the ticked rows the filters show, into the account chosen for this file.
 function footer(ctx) {
-  const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars), selection = importSelection(s);
+  const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars);
   if (!s.job && !s.pendingCommit) return '';
   if (s.pendingCommit) return `<div class="import-footer"><div><strong>${h(t('commitUncertain'))}</strong><p>${h(s.pendingCommit.key)}</p></div>${button('retry-commit', t(s.busy === 'committing' ? 'committing' : 'retryCommit'), Boolean(s.busy), true)}</div>`;
-  if (!editableImport(s.job)) return '';
-  const counts = groupCounts(s.job), account = accountName(ctx, s.job.account_number);
-  if (!counts.ready && !selection.imports) return '';
-  // "Import all" follows the payment filter of the ready list.
-  const payment = activeGroup(s) === 'ready' ? s.payment : null;
-  const ready = payment === null ? counts.ready : Number(s.job.payment_methods?.ready?.[payment] || 0);
-  const allLabel = payment === null ? t('importAll', { count: ready }) : t('importAllPayment', { count: ready, payment: payment || t('noPayment') });
-  if (s.confirming) return `<div class="import-footer is-confirming"><div><strong>${h(t('confirmImport', { count: selection.imports, account }))}</strong><p>${h(t('confirmImportHint'))}</p></div><div class="button-row">
-    ${button('back-review', t('cancel'), Boolean(s.busy))}${button('commit', t(s.busy === 'committing' ? 'committing' : 'confirmCommit'), locked(s) || !selection.total, true)}</div></div>`;
-  return `<div class="import-footer"><div><strong>${h(selection.imports ? t('selectedCount', { count: selection.imports }) : t('readyCount', { count: ready }))}</strong><p>${h(t('footerHint'))}</p></div><div class="button-row">
-    ${selection.imports ? button('confirm', t('importSelected', { count: selection.imports }), locked(s), true) : button('import-all', allLabel, locked(s) || !ready, true)}</div></div>`;
+  if (!editableImport(s.job) || !s.rows.length) return '';
+  const count = selectedRows(s).length, committing = s.busy === 'committing';
+  return `<div class="import-footer"><div><strong>${h(committing ? t('importingRows') : count ? t('selectedCount', { count }) : t('nothingSelected'))}</strong>
+    <p>${h(t('importTarget', { account: accountName(ctx, s.job.account_number) }))}${h(t('listSeparator'))}${h(t('footerHint'))}</p></div><div class="button-row">
+    ${button('import-selected', t(committing ? 'importingRows' : 'importSelected', { count }), locked(s) || !count, true)}</div></div>`;
 }
 export function importParts(ctx) {
   const s = ctx.state.importData;
   return {
     heading: `<header class="page-header"><div class="page-heading"><h1>${h(importText(ctx, 'page'))}</h1></div></header>`,
-    setup: setup(ctx), stage: stage(ctx), alerts: notice(ctx, s.error, true) + notice(ctx, s.pollingError, true) + notice(ctx, s.notice) + (s.conflict ? notice(ctx, 'conflict') : ''),
-    mapping: mapping(ctx), summary: summary(ctx), controls: controls(ctx), table: table(ctx), footer: footer(ctx),
+    setup: setup(ctx), stage: stage(ctx), alerts: notice(ctx, s.error, true) + notice(ctx, s.pollingError, true) + notice(ctx, s.notice, false, s.noticeVars) + (s.conflict ? notice(ctx, 'conflict') : ''),
+    mapping: mapping(ctx), summary: summary(ctx), controls: filters(ctx), table: table(ctx), footer: footer(ctx),
   };
 }
 export function importView(ctx) {

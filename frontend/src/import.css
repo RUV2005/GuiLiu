@@ -138,14 +138,6 @@
 .import-nothing { margin: 6px 0; color: var(--ink-soft); font-size: 14px; line-height: 1.8; }
 .import-account-hint { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin: 16px 0 4px; padding: 14px 16px; border-left: 2px solid var(--warning); background: var(--surface-2); }
 .import-account-hint p { flex: 1 1 360px; margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
-.import-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 18px 0 8px; }
-.import-group { display: grid; gap: 4px; align-content: start; min-width: 0; padding: 14px 16px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); color: var(--ink-soft); font: inherit; cursor: pointer; }
-.import-group:hover:not(:disabled) { background: var(--surface-hover); }
-.import-group.is-active { border-color: var(--ink-soft); background: var(--surface-2); color: var(--ink); }
-.import-group strong { font: 400 26px/1.2 var(--font-numeric); color: var(--ink); }
-.import-group span { font-size: 13px; font-weight: 500; }
-.import-group small { color: var(--muted); font-size: 11px; line-height: 1.6; }
-.import-group.is-attention strong { color: var(--warning); }
 .import-toolbar h2 { font: 500 15px/1.5 var(--font-ui); color: var(--ink); }
 .import-toolbar > div > p { color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 2px; }
 .import-cell-merchant strong, .import-cell-merchant .import-cell-trigger { display: block; color: var(--ink); font-weight: 500; }
@@ -171,7 +163,25 @@
   .import-toolbar { flex-direction: column; align-items: stretch; }
   .import-tools { justify-content: stretch; }
   .import-tools :is(input, select) { flex: 1 1 100%; width: 100%; }
-  .import-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .import-footer { flex-direction: column; align-items: stretch; }
   .import-footer .button-row .button { flex: 1; }
+}
+/* Filter bar: what to show and import. Each chip keeps or drops one value; its number is what it would show. */
+.import-filters { display: grid; gap: 10px; margin: 18px 0 14px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); }
+.import-filter-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; align-items: start; }
+.import-filter-label { padding-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.import-chips, .import-filter-inputs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.import-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 11px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--muted); font: 400 12px/1.5 var(--font-ui); cursor: pointer; text-decoration: line-through; text-decoration-color: var(--line-strong); }
+.import-chip span { color: var(--quiet); font-family: var(--font-numeric); }
+.import-chip:hover:not(:disabled) { background: var(--surface-hover); }
+.import-chip.is-on { border-color: var(--ink-soft); background: var(--surface-2); color: var(--ink); text-decoration: none; }
+.import-chip.is-on span { color: var(--ink-soft); }
+.import-filter-inputs input[type="date"] { width: 150px; }
+.import-filter-inputs input[type="search"] { flex: 1 1 200px; min-width: 160px; }
+.import-table tr.is-unticked td { opacity: .55; }
+.import-table tr.is-unticked td:first-child { opacity: 1; }
+@media (max-width: 640px) {
+  .import-filter-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .import-filter-label { padding-top: 0; }
+  .import-filter-inputs input[type="date"] { flex: 1 1 0; min-width: 0; width: auto; }
 }

@@ -1,6 +1,7 @@
 import { createImportState, validateImportFile, validateJob, validateRows, processingImport, editableImport,
-  IMPORT_PAGE_SIZE, planImportBatches, importOperationKey, correctionValues, canEditImportRow, presetTemplate, parseImportPreset,
-  groupCounts, defaultGroup, activeGroup, canImportRow, selectImportRow, rowDone, paymentQuery } from './import-model.js';
+  planImportBatches, importOperationKey, correctionValues, canEditImportRow, presetTemplate, parseImportPreset,
+  defaultImportFilter, IMPORT_SHOWN_STEP } from './import-model.js';
+const IMPORT_ROWS_PAGE = 500;
 
 export function createImportService({ api, state, source, changed = () => {}, afterCommit = async () => {},
   storage = globalThis.sessionStorage, preferences = globalThis.localStorage, visible = () => !globalThis.document?.hidden,
@@ -60,38 +61,32 @@ export function createImportService({ api, state, source, changed = () => {}, af
     }
     persist(s); return true;
   }
-  // Show the group that needs the user; move on when the shown group has emptied (for example after importing).
-  function ensureFilter(s) {
-    const counts = groupCounts(s.job), group = activeGroup(s);
-    if (s.payment !== null && !s.job.payment_methods?.[group]?.[s.payment]) s.payment = null;
-    if (s.filter && (!group || counts[group])) return;
-    s.filter = 'group:' + defaultGroup(s.job); s.rows = []; s.query = ''; s.payment = null;
-  }
-  async function loadRows(append = false) {
+  // The whole preview is read once it is ready, so the filter bar can count and filter every row on the page.
+  async function loadRows() {
     const s = ensureScope();
     if (!s.job || processingImport(s.job.state) || s.job.state === 'mapping_required') return false;
-    if (!append) ensureFilter(s);
-    const id = s.job.import_id, revision = s.job.revision, filter = s.filter, payment = paymentQuery(s.payment);
-    if (append && (s.rowsLoading || s.nextOffset === null)) return false;
-    const offset = append ? s.nextOffset : 0, token = ++rowEpoch;
-    const keepCount = append ? 0 : s.rows.length;
+    const id = s.job.import_id, revision = s.job.revision, token = ++rowEpoch;
     s.rowsLoading = true; paint(s);
     try {
-      const data = validateRows((await read(s, options => api.getImportRows(id, { offset, limit: IMPORT_PAGE_SIZE, status: filter, payment }, options))).result, offset);
-      while (!append && data.next_offset !== null && data.rows.length < keepCount) {
+      const rows = [];
+      for (let offset = 0; ;) {
+        const page = validateRows((await read(s, options => api.getImportRows(id, { offset, limit: IMPORT_ROWS_PAGE }, options))).result, offset);
         if (!live(s) || token !== rowEpoch || s.job?.revision !== revision) return false;
-        const next = data.next_offset;
-        const page = validateRows((await read(s, options => api.getImportRows(id, { offset: next, limit: IMPORT_PAGE_SIZE, status: filter, payment }, options))).result, next);
-        data.rows.push(...page.rows); data.next_offset = page.next_offset; data.total = page.total;
+        rows.push(...page.rows); s.total = page.total;
+        if (page.next_offset === null) break;
+        offset = page.next_offset;
       }
-      if (!live(s) || token !== rowEpoch || s.filter !== filter || paymentQuery(s.payment) !== payment || s.job?.revision !== revision) return false;
-      s.rows = append ? [...new Map([...s.rows, ...data.rows].map(row => [row.row_id, row])).values()] : data.rows;
-      for (const row of data.rows) s.rowCache.set(row.row_id, row);
-      s.total = data.total; s.nextOffset = data.next_offset; s.rowsRevision = revision;
+      s.rows = rows; s.rowCache.clear();
+      for (const row of rows) s.rowCache.set(row.row_id, row);
+      s.nextOffset = null; s.rowsRevision = revision;
       if (s.editor) s.editor.latest = s.rowCache.get(s.editor.id)?.normalized;
       return true;
     } catch (error) { if (live(s) && token === rowEpoch) s.error = message(error); return false; }
     finally { if (live(s) && token === rowEpoch) { s.rowsLoading = false; paint(s); } }
+  }
+  // A new file starts with the default filters and every row ticked.
+  function resetReview(s) {
+    s.importFilter = defaultImportFilter(); s.unchecked.clear(); s.shown = IMPORT_SHOWN_STEP; s.noticeVars = null;
   }
   function arm(delay) {
     unschedule(timer); timer = null;
@@ -155,7 +150,7 @@ export function createImportService({ api, state, source, changed = () => {}, af
       try { preferences?.setItem(accountKey(s.scope), String(s.form.account_number)); } catch { /* Optional. */ }
       s.job = null; s.resumeId = ''; s.rows = []; s.rowCache.clear(); s.choices.clear(); s.distinct.clear(); s.externalIncome.clear(); s.expanded.clear();
       s.rowsRevision = null; s.filter = ''; s.query = ''; s.confirming = false; s.conflict = false; s.mappingFor = '';
-      applyJob(s, job, true); return true;
+      resetReview(s); applyJob(s, job, true); return true;
     } catch (error) { if (live(s)) s.error = message(error); return false; }
     finally { if (live(s)) { s.busy = ''; paint(s); arm(200); } }
   }
@@ -280,30 +275,8 @@ export function createImportService({ api, state, source, changed = () => {}, af
     s.job = null; s.resumeId = ''; s.file = file; s.rows = []; s.rowCache.clear(); s.rowsRevision = null;
     s.choices.clear(); s.distinct.clear(); s.externalIncome.clear(); s.confirming = false; s.error = ''; s.notice = ''; s.conflict = false;
     s.rowsLoading = false; s.nextOffset = null; s.total = 0; s.pollingError = ''; s.expanded.clear();
-    s.mappingFor = ''; s.filter = ''; s.query = ''; s.completedBatches = 0;
+    s.mappingFor = ''; s.filter = ''; s.query = ''; s.completedBatches = 0; resetReview(s);
     persist(s); paint(s); return true;
-  }
-  // Select every row of a group that can be imported, across all pages, not only the rows loaded so far.
-  async function selectGroup(group) {
-    const s = ensureScope();
-    if (!s.job || !editableImport(s.job) || s.busy || s.pendingCommit || s.editor || s.rowsRevision !== s.job.revision) return false;
-    const id = s.job.import_id, revision = s.job.revision, payment = paymentQuery(s.payment);
-    s.busy = 'selecting'; paint(s);
-    try {
-      let offset = 0;
-      for (;;) {
-        const page = validateRows((await read(s, options => api.getImportRows(id, { offset, limit: 100, status: 'group:' + group, payment }, options))).result, offset);
-        if (!live(s) || s.job?.revision !== revision) return false;
-        for (const row of page.rows) {
-          s.rowCache.set(row.row_id, row);
-          if (!rowDone(row) && canImportRow(row, s.distinct.has(row.row_id), s.externalIncome.has(row.row_id))) selectImportRow({ ...s, busy: '' }, row, 'import');
-        }
-        if (page.next_offset === null) break;
-        offset = page.next_offset;
-      }
-      return true;
-    } catch (error) { if (live(s)) s.error = message(error); return false; }
-    finally { if (live(s)) { s.busy = ''; paint(s); } }
   }
   // Read the same file again into another account (the preview said its rows were imported there before).
   async function switchAccount(number) {
@@ -326,5 +299,5 @@ export function createImportService({ api, state, source, changed = () => {}, af
     if (!timer && !statusFlight && (s.job || s.resumeId)) arm(200);
   }
   function dispose() { unschedule(timer); for (const read of reads) read.abort(); reads.clear(); }
-  return { ensureScope, setup, poll, loadRows, upload, selectPreset, savePreset, saveEditor, commit, newFile, syncActive, dispose, selectGroup, switchAccount };
+  return { ensureScope, setup, poll, loadRows, upload, selectPreset, savePreset, saveEditor, commit, newFile, syncActive, dispose, switchAccount };
 }

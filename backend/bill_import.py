@@ -800,9 +800,6 @@ class ImportService:
         return {**{k: v for k, v in job.items() if k not in {"rows", "source_path", "commits", "classification_cache"}},
                 "counts": dict(Counter(row.get("commit_status") or row["status"] for row in rows)), "total": len(rows),
                 "groups": {group: 0 for group in self.GROUPS} | dict(Counter(self.row_group(row) for row in rows)),
-                # Payment methods per group, so a file mixing (say) Huabei and a bank card can be imported one by one.
-                "payment_methods": {group: dict(Counter(row["normalized"].get("payment_method") or "" for row in rows
-                                                        if self.row_group(row) == group)) for group in self.GROUPS},
                 "previous_accounts": self.previous_accounts(job),
                 "classification": {"memory": sources["classification_memory"] + sources["shop_name_table"],
                                    "model": sources["llm"], "user": sources["user_confirmed"],
@@ -811,16 +808,11 @@ class ImportService:
     def get(self, ident):
         return self.summary(self.load(ident))
 
-    def rows(self, ident, status=None, offset=0, limit=50, payment=None):
+    def rows(self, ident, status=None, offset=0, limit=50):
         rows = self.load(ident)["rows"]
-        if payment is not None:
-            payment = "" if payment == "__none__" else payment
-            rows = [row for row in rows if (row["normalized"].get("payment_method") or "") == payment]
         if status == "unclassified":
             # Not a row status: expenses still lacking a category, the preview's "to classify" filter.
             rows = [row for row in rows if self._open_expense(row)[1]]
-        elif status and status.startswith("group:"):
-            rows = [row for row in rows if self.row_group(row) == status[6:]]
         elif status:
             rows = [row for row in rows if (row.get("commit_status") or row["status"]) == status]
         return {"rows": rows[offset:offset + limit], "total": len(rows), "offset": offset,
