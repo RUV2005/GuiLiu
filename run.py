@@ -140,6 +140,52 @@ def supervisor_alive(record):
     return bool(same_process(record))
 
 
+# What each service's command line holds, to recognise a service of this copy from an older record (pids only).
+SERVICE_MARKS = {'backend': 'BackendAPI:app', 'agent': 'agent_api:app', 'frontend': 'server.mjs'}
+
+
+def orphaned_services(state):
+    """Services recorded by a supervisor that is gone but that still run: same identity, or (older records) same pid
+    with this copy's folder and the service's entry point on its command line."""
+    from backend.system_control import identity, same_process
+    import psutil
+    found = []
+    for name, record in (state.get('services') or {}).items():
+        if same_process(record['process']):
+            found.append({'role': name, **record})
+    if found or not state.get('children'):
+        return found
+    for name, pid in state['children'].items():
+        try:
+            process = psutil.Process(pid)
+            command = ' '.join(process.cmdline())
+            cwd = process.cwd()
+        except (psutil.Error, OSError):
+            continue
+        if SERVICE_MARKS.get(name, '\0') in command and str(HOME).lower() in (command + ' ' + cwd).lower():
+            port = state.get('ports', {}).get(name)
+            found.append({'role': name, 'process': identity(process), 'port': port, 'url': f'http://127.0.0.1:{port}'})
+    return found
+
+
+def stop_orphans():
+    try:
+        state = json.loads((RUNTIME / 'processes.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return
+    try:
+        if supervisor_alive(state['supervisor_process']):
+            return
+    except (KeyError, TypeError):
+        pass
+    targets = orphaned_services(state)
+    if targets:
+        from backend.system_control import stop_services
+        print('Stopping services left running by an earlier start of this copy.', flush=True)
+        stop_services(targets, auth_file=RUNTIME / 'data/security/service-credentials.json')
+    (RUNTIME / 'processes.json').unlink(missing_ok=True)
+
+
 def running_instance(timeout=90):
     """Ports of this copy's live supervisor once its frontend answers; None when it is not running."""
     try:
@@ -225,6 +271,7 @@ def serve(args):
             pair_browser(running['frontend'], RUNTIME / 'data/security/service-credentials.json',
                          f'Open {url} and use a pairing code from .runtime/logs/frontend.out.log.')
         return
+    stop_orphans()
     chosen = choose_ports(requested)
     for name, port in chosen.items():
         if requested[name] is None and port != DEFAULT_PORTS[name]:
@@ -261,7 +308,10 @@ def serve(args):
         write_json(RUNTIME / 'processes.json', {'supervisor': os.getpid(), 'root': str(ROOT),
                    'supervisor_process': identity(psutil.Process()), 'control_token': control_token,
                    'ports': {'frontend': args.frontend_port, 'backend': args.backend_port, 'agent': args.agent_port},
-                   'children': {name: p.pid for name, p in processes}, 'smoke_test': args.smoke_test})
+                   'children': {name: p.pid for name, p in processes}, 'smoke_test': args.smoke_test,
+                   # Identities, so a later start can stop these safely if this supervisor ends without stopping them.
+                   'services': {name: {'process': identity(psutil.Process(p.pid)), 'port': getattr(args, name + '_port'),
+                                       'url': f"http://127.0.0.1:{getattr(args, name + '_port')}"} for name, p in processes}})
         pending = {f'http://127.0.0.1:{args.frontend_port}/healthz',
                    f'http://127.0.0.1:{args.backend_port}/healthz',
                    f'http://127.0.0.1:{args.agent_port}/agent/health'}
