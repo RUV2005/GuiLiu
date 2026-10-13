@@ -23,10 +23,10 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
       <div class="setup-inline-actions">${action(t('saveSelection'), 'save-selected')}${action(t('retryConfirmation'), 'retry-confirmation')}</div></section>
     <section class="setup-review-region" aria-labelledby="setup-accounts-title"><header class="setup-region-header">${label('savedAccounts', 'h2', 'id="setup-accounts-title"')}${action(t('addAccount'), 'create')}</header>
       <div data-review-account-feedback role="status"></div><div data-review-accounts></div></section></div>
-    <footer class="setup-review-confirm"><div class="setup-inline-actions">${action(t('reviewContinue'), 'confirm')}${action(t('retry'), 'refresh')}</div></footer>`;
+    <footer class="setup-review-confirm"><div class="setup-inline-actions">${action(t('reviewContinue'), 'confirm')}</div></footer>`;
   function relocalize() {
     for (const node of root.querySelectorAll('[data-setup-copy]')) node.textContent = t(node.dataset.setupCopy);
-    for (const [type, key] of Object.entries({ create: 'addAccount', confirm: 'reviewContinue', refresh: 'retry', 'retry-confirmation': 'retryConfirmation' })) {
+    for (const [type, key] of Object.entries({ create: 'addAccount', confirm: 'reviewContinue', 'retry-confirmation': 'retryConfirmation' })) {
       for (const node of root.querySelectorAll(`[data-review-action="${type}"]`)) node.textContent = t(key);
     }
     const candidateTemplate = root.ownerDocument.createElement('template');
@@ -121,7 +121,7 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
     selectAll.indeterminate = count > 0 && count < selected.length;
     selectAll.disabled = !selected.length || writing || !editable || Boolean(state.accountPending) || Boolean(state.confirmationPending) || state.accountEditing || state.uncertain;
     const save = root.querySelector('[data-review-action="save-selected"]');
-    save.textContent = count ? t('saveSelectedCount').replace('{selected}', count).replace('{skipped}', selected.length - count) : t('skipAllSources');
+    save.textContent = count ? t('saveSelectedCount').replace('{selected}', count).replace('{skipped}', selected.length - count) : t(selected.length ? 'skipAllSources' : 'noBankContinue');
     save.hidden = !editable && !busyStatus(state.status);
     const edit = draft.editor && root.querySelector('[data-review-table-form]');
     if (edit) {

@@ -55,8 +55,7 @@ function funding(ctx) {
   if (!plan || plan.id !== s.selected || !visiblePlan(plan)) return '';
   const disabled = blocked(s), entryDisabled = disabled || (plan.status !== 'active' || plan.start_date > japanDay() ? ' disabled' : '');
   return '<header class="plan-section-heading"><h3>' + h(tx(ctx, 'accounts')) + '</h3>' + button(ctx, 'chooseAccounts', 'accounts', plan.id, disabled) + '</header>' +
-    (plan.account_numbers.map(number => fundingRow(ctx, plan, number, entryDisabled)).join('') || '<p class="plan-muted">' + h(tx(ctx, 'noLinkedAccounts')) + '</p>') +
-    (plan.account_numbers.length ? '<p class="plan-muted">' + h(tx(ctx, 'allocationHintLive')) + '</p>' : '');
+    (plan.account_numbers.map(number => fundingRow(ctx, plan, number, entryDisabled)).join('') || '<p class="plan-muted">' + h(tx(ctx, 'noLinkedAccounts')) + '</p>');
 }
 // How far along: the share of the target as a bar under the two headline metrics, which stay as they are (running total
 // and projected completion, without outlook captions).
@@ -78,7 +77,7 @@ function detail(ctx, fundingHtml = '') {
     '<div class="plan-progress-controls button-row">' + button(ctx, 'increaseProgress', 'increase', plan.id, entryDisabled) + button(ctx, 'decreaseProgress', 'decrease', plan.id, entryDisabled) + '</div>' +
     '<div class="plan-analysis"><section class="plan-trend"><header class="plan-section-heading"><h3>' + h(tx(ctx, 'progress')) + '</h3></header>' +
     (s.loading.chart && !s.chart ? '<p class="plan-muted">' + h(tx(ctx, 'loading')) + '</p>' : s.errors.chart ? '<p role="alert">' + h(tx(ctx, s.errors.chart)) + '</p>' : chartMarkup(ctx, plan, forecast)) +
-    '<p class="plan-muted">' + h(tx(ctx, 'forecastNote')) + '</p></section>' +
+    '</section>' +
     '<section class="plan-funding" data-plans-part="funding">' + fundingHtml + '</section></div>' +
     '<section class="plan-activity"><header class="plan-section-heading"><h3>' + h(tx(ctx, 'activity')) + '</h3></header>' +
     (s.entries.length ? '<div class="plan-activity-scroll"><table><thead><tr>' + ['date', 'entryKind', 'account', 'amount', 'note', 'operation'].map(key => '<th>' + h(tx(ctx, key)) + '</th>').join('') + '</tr></thead><tbody>' +

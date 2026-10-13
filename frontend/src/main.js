@@ -1,6 +1,6 @@
 import { ApiClient } from "./api.js";
 import { createRuntimeSettingsController } from './runtime-settings-controller.js';
-import { createMailboxSettingsController, watchMailboxJob } from './mailbox-settings.js';
+import { createMailboxSettingsController, watchGmailAuthorization, watchMailboxJob } from './mailbox-settings.js';
 import { createUpdateController } from './update-settings.js';
 import { pageTitle } from './build-info.js';
 import { createUserProfileController } from './user-profile.js';
@@ -218,7 +218,8 @@ if (!state.selectedGoalId && state.goals.length) {
 }
 
 const api = new ApiClient(() => state.settings);
-const userProfile = createUserProfileController({ state, api, context: currentContext, root });
+// A new avatar or ID shows at once on the user's messages in the chat as well.
+const userProfile = createUserProfileController({ state, api, context: currentContext, root, onChange: () => renderAgent() });
 const systemShutdown = createSystemShutdownController({ state, api, context: currentContext,
   source: () => normalizeServiceBase(state.settings.backendPath, DEFAULT_SETTINGS.backendPath), beforeExit: saveState,
   blocked: () => {
@@ -230,6 +231,10 @@ const runtimeSettings = createRuntimeSettingsController({ state, api, context: c
   source: () => normalizeServiceBase(state.settings.backendPath, DEFAULT_SETTINGS.backendPath) });
 // Outside Settings, a mailbox being added still reports when it needs the user.
 const mailboxWatch = watchMailboxJob({ api, notify, language: () => state.settings.language, start: false });
+// A Gmail authorization Google revoked (after a Google password change, say) is reported once and kept in the sidebar.
+const gmailWatch = watchGmailAuthorization({ state, api, notify, context: currentContext,
+  // An open Settings page shows Gmail's row change from connected to lost (or back) without leaving it.
+  onChange: () => { if (state.route === 'settings') void mailboxSettings.load(); } });
 const mailboxSettings = createMailboxSettingsController({ state, api, context: currentContext, onJobStarted: () => mailboxWatch.check(),
   source: () => normalizeServiceBase(state.settings.backendPath, DEFAULT_SETTINGS.backendPath) });
 const updateSettings = createUpdateController({ state, api, context: currentContext,
@@ -867,6 +872,7 @@ async function initialize() {
   refreshExchangeRates();
   void startFirstMailImport();
   updateSettings.watch();
+  gmailWatch.watch();
   void remindAboutMailbox();
 }
 
@@ -2485,8 +2491,8 @@ window.addEventListener("beforeunload", saveState);
 window.addEventListener('focus', () => void userProfile.refresh());
 window.addEventListener('pagehide', () => userProfile.stop());
 window.addEventListener('pageshow', () => void userProfile.refresh());
-window.addEventListener('pagehide', () => { mailboxSettings.leave(); updateSettings.stop(); });
-window.addEventListener('pageshow', event => { if (event.persisted) { mailboxSettings.mount(); updateSettings.mount(); updateSettings.watch(); } });
+window.addEventListener('pagehide', () => { mailboxSettings.leave(); updateSettings.stop(); gmailWatch.stop(); });
+window.addEventListener('pageshow', event => { if (event.persisted) { mailboxSettings.mount(); updateSettings.mount(); updateSettings.watch(); gmailWatch.watch(); } });
 window.addEventListener('pagehide', () => fullMailImport.leave());
 window.addEventListener('pagehide', () => systemShutdown.leave());
 window.addEventListener('pageshow', event => { if (event.persisted) fullMailImport.mount(); });

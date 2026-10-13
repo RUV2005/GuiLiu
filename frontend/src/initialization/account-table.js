@@ -42,6 +42,7 @@ export function accountTableMarkup(accounts, editor, t, language = 'zh', sources
   const amount = value => setupAmount(value, language, t('balanceUnknown'));
   const input = (key, label, value, attrs = '') => `<input name="${key}" aria-label="${e(t(label))}" value="${e(value)}" ${attrs}>`;
   const cellButton = (a, kind, key, label, value) => `<button type="button" class="setup-cell-button" data-review-action="${kind}" data-id="${e(a.account_number)}" data-field="${key}" aria-label="${e(t('editCell') + ' ' + a.name + ' · ' + t(label))}">${e(value === '' || value == null ? t('notFilled') : value)}</button>`;
+  const blank = '<span class="setup-cell-blank">—</span>';
   const rows = accounts.map(a => {
     const active = inline && String(a.account_number) === inline.id;
     const details = active && inline.kind === 'update', balance = active && inline.kind === 'calibrate';
@@ -50,11 +51,11 @@ export function accountTableMarkup(accounts, editor, t, language = 'zh', sources
     return `<tr data-account-row="${e(a.account_number)}" ${active ? 'class="is-editing"' : ''}>
       <th scope="row">${details ? input('name', 'name', f.name, 'maxlength="100" required') : cellButton(a, 'update', 'name', 'name', a.name)}</th>
       <td>${details ? `<select name="account_type" aria-label="${e(t('account_type'))}">${ACCOUNT_TYPES.map(type => option(type, t(type), type === f.account_type)).join('')}</select>` : cellButton(a, 'update', 'account_type', 'account_type', t(a.account_type))}</td>
-      <td>${details ? input('institution', 'institutionLabel', f.institution, 'maxlength="100"') : cellButton(a, 'update', 'institution', 'institutionLabel', a.institution)}</td>
+      <td>${details ? input('institution', 'institutionLabel', f.institution, 'maxlength="100"') : cellButton(a, 'update', 'institution', 'institutionLabel', a.institution || (a.account_type === 'cash' ? '—' : ''))}</td>
       <td class="setup-account-currency">${e(setupCurrency(a.currency))}</td>
       <td class="setup-account-amount">${balance ? input('confirmed_balance', a.account_type === 'credit' ? 'currentDebt' : 'confirmedBalance', f.confirmed_balance, `inputmode="decimal" required placeholder="${e(t(a.account_type === 'credit' ? 'debtPlaceholder' : 'balancePlaceholder'))}"`)
         : a.account_type === 'credit' ? cellButton(a, 'calibrate', 'confirmed_balance', 'currentDebt', t('debtShort') + ' ' + amount(a.outstanding_balance)) : cellButton(a, 'calibrate', 'confirmed_balance', 'accountBalance', amount(a.balance))}</td>
-      <td class="setup-account-amount">${details ? `<span data-review-credit ${credit ? '' : 'hidden'}>${input('credit_limit', 'credit_limit', f.credit_limit, 'inputmode="decimal"')}</span><span data-review-no-credit ${credit ? 'hidden' : ''}>—</span>` : credit ? cellButton(a, 'update', 'credit_limit', 'credit_limit', amount(a.credit_limit)) : '—'}</td>
+      <td class="setup-account-amount">${details ? `<span data-review-credit ${credit ? '' : 'hidden'}>${input('credit_limit', 'credit_limit', f.credit_limit, 'inputmode="decimal"')}</span><span data-review-no-credit ${credit ? 'hidden' : ''}>${blank}</span>` : credit ? cellButton(a, 'update', 'credit_limit', 'credit_limit', amount(a.credit_limit)) : blank}</td>
       <td class="setup-account-source" data-account-source="${e(a.account_number)}">${accountSourceMarkup(a, sources, receiptEmail, t)}</td>
       <td class="setup-account-row-actions">${active ? `<button type="submit" class="setup-button primary">${e(t('saveShort'))}</button><button type="button" class="setup-button" data-review-action="cancel-account">${e(t('cancel'))}</button>` : ''}</td>
     </tr>${balance ? `<tr class="setup-account-row-note"><td colspan="8"><label class="setup-table-note"><span>${e(t('note'))}</span>${input('note', 'note', f.note, 'maxlength="1000"')}</label></td></tr>` : ''}`;
@@ -66,8 +67,8 @@ export function accountTableMarkup(accounts, editor, t, language = 'zh', sources
     <td>${input('institution', 'institutionLabel', f.institution, 'maxlength="100"')}</td>
     <td><select name="currency" aria-label="${e(t('currency'))}">${['JPY', 'CNY'].map(c => option(c, c, c === f.currency)).join('')}</select></td>
     <td>${balanceInput(f.opening_balance, f.account_type === 'credit', t)}</td>
-    <td><span data-review-credit ${f.account_type === 'credit' ? '' : 'hidden'}>${input('credit_limit', 'credit_limit', f.credit_limit, 'inputmode="decimal"')}</span><span data-review-no-credit ${f.account_type === 'credit' ? 'hidden' : ''}>—</span></td>
-    <td>—</td><td class="setup-account-row-actions"><button type="submit" class="setup-button primary">${e(t('saveShort'))}</button><button type="button" class="setup-button" data-review-action="cancel-account">${e(t('cancel'))}</button></td>
+    <td><span data-review-credit ${f.account_type === 'credit' ? '' : 'hidden'}>${input('credit_limit', 'credit_limit', f.credit_limit, 'inputmode="decimal"')}</span><span data-review-no-credit ${f.account_type === 'credit' ? 'hidden' : ''}>${blank}</span></td>
+    <td>${blank}</td><td class="setup-account-row-actions"><button type="submit" class="setup-button primary">${e(t('saveShort'))}</button><button type="button" class="setup-button" data-review-action="cancel-account">${e(t('cancel'))}</button></td>
     </tr><tr data-review-duplicate hidden><td colspan="8"><label class="setup-check"><input type="checkbox" name="confirm_duplicate" ${f.confirm_duplicate ? 'checked' : ''}>${e(t('separateAccount'))}</label></td></tr>`;
   return `<form data-review-account-form data-review-table-form class="setup-account-table-form"><div class="setup-account-table-scroll" role="region" aria-label="${e(t('accountsTitle'))}" tabindex="0">
     <table class="setup-account-table"><colgroup>${['name', 'type', 'institution', 'currency', 'amount', 'credit', 'source', 'actions'].map(name => `<col class="setup-account-col-${name}">`).join('')}</colgroup><thead><tr>${['name', 'account_type', 'institution', 'currency', 'balanceOrDebt', 'credit_limit', 'sourceEmail', 'actions'].map(key => `<th scope="col">${e(t(key))}</th>`).join('')}</tr></thead><tbody>${rows}${createRow}${!rows && !creating ? `<tr><td colspan="8">${e(t('noSavedAccounts'))}</td></tr>` : ''}</tbody></table>

@@ -1,6 +1,6 @@
 import { t } from './i18n.js';
 import { escapeHtml as e, formatAmount } from './utils.js';
-import { assetNumber, overviewAssetQuery, assetHistoryPoint, assetHistoryChange, assetHistorySeries, assetHistoryScopeChanged } from './assets-model.js';
+import { assetNumber, overviewAssetQuery, assetHistoryPoint, assetHistoryChange, assetHistorySeries } from './assets-model.js';
 import { assetAxisOptions } from './assets-view.js';
 import { financeAttr } from './finance-colors.js';
 import { lineChart } from './charts.js';
@@ -45,7 +45,6 @@ function regions(ctx, width, now) {
   if ((data.overview && assets.cachedAt?.overview) || (data.history && assets.cachedAt?.history)) notices.push(text('assetCached'));
   if (data.overview?.fx?.status === 'stale') notices.push(text('assetFxStale'));
   if (data.days.some(day => day.knownValue !== null)) notices.push(text('assetHistoryPartial'));
-  if (assetHistoryScopeChanged(data.days)) notices.push(text('assetHistoryScopeChanged'));
   if (data.hasValues && data.days.some(day => day.value === null && day.knownValue === null)) notices.push(text('assetHistoryMissing'));
   const status = notices.map(message => '<p class="overview-assets-notice" role="status">' + e(message) + '</p>').join('');
   const pending = !data.history && !assets.historyError;

@@ -3345,7 +3345,6 @@ button.category-tag:hover:not(.is-editing) {
   border-radius: 6px;
 }
 
-.settings-page .field:has(> .primary-currency-hint) > select { grid-row: 1 / span 2; }
 
 .settings-page .field > small {
   grid-column: 1;
@@ -3376,7 +3375,8 @@ button.category-tag:hover:not(.is-editing) {
 .mailbox-settings-summary { margin: 0; }
 .mailbox-settings-summary > div {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 300px) auto;
+  /* The name on the left; the state sits right beside its button, the way a row reads: Gmail … connected [Reconnect]. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px 32px;
   min-height: 64px;
@@ -3392,6 +3392,8 @@ button.category-tag:hover:not(.is-editing) {
 .mailbox-settings-note { margin: 12px 0 0; color: var(--muted); font: 400 12px/1.7 var(--font-ui); }
 .mailbox-settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 16px; }
 .mailbox-settings-feedback { min-height: 1.7em; margin: 12px 0 0; color: var(--ink); font: 400 13px/1.7 var(--font-ui); overflow-wrap: anywhere; }
+/* An empty live region keeps its place in the page for announcements but takes no room under the rows. */
+.mailbox-settings .mailbox-settings-feedback:empty { min-height: 0; margin: 0; }
 .mailbox-settings-feedback[role="alert"] { color: var(--danger); }
 .update-progress { width: 100%; max-width: 420px; height: 6px; margin-top: 8px; accent-color: var(--accent); }
 /* Sidebar update entry, above the profile block: a small blue mark and a short line of text. */
@@ -3404,6 +3406,27 @@ button.category-tag:hover:not(.is-editing) {
 .sidebar-update-mark { display: grid; flex: 0 0 18px; width: 18px; height: 18px; place-items: center; color: #fff; background: var(--update-blue); border-radius: 50%; }
 .sidebar-update-mark svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .sidebar-update.is-busy .sidebar-update-mark { animation: sidebar-update-pulse 1.6s ease-in-out infinite; }
+/* Gmail authorization Google revoked: the same entry with a red mark; it opens Settings → Mailboxes. */
+.sidebar-alert .sidebar-update-mark { background: var(--danger); }
+/* Settings → Profile: the avatar with its two buttons, and the ID with its own Save. */
+.profile-settings-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); align-items: center; column-gap: 32px; min-height: 56px; padding: 10px 0; }
+.profile-settings-label { color: var(--ink-soft); font: 500 14px/1.5 var(--font-ui); }
+.profile-settings-avatar, .profile-settings-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.profile-settings-avatar .profile-avatar-large { flex: 0 0 56px; width: 56px; height: 56px; font-size: 20px; }
+.profile-settings-name input { flex: 1 1 auto; min-width: 0; height: 40px; padding: 0 11px; color: var(--ink); background: var(--surface-1);
+  border: 1px solid var(--line); border-radius: 6px; outline: none; font-size: 13px; transition: border-color 150ms ease; }
+.profile-settings-name input:focus { border-color: var(--line-strong); }
+.profile-settings-feedback { min-height: 0; margin: 0 0 6px; color: var(--muted); font: 400 13px/1.6 var(--font-ui); }
+.profile-settings-feedback:empty { margin: 0; }
+.profile-settings-feedback.is-error { color: var(--danger); }
+@container settings (max-width: 540px) {
+  .profile-settings-row { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+}
+/* The chat: the user's own picture in their avatar, and their ID beside it. */
+.agent-message-avatar.has-picture { overflow: hidden; padding: 0; }
+.agent-message-avatar.has-picture img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.agent-message-name { color: var(--ink-soft); font: 500 12px/1.4 var(--font-ui); }
+.sidebar-alert:focus-visible { box-shadow: inset 0 0 0 1px var(--danger); }
 .sidebar-update-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sidebar-collapsed .sidebar-update { justify-content: center; padding-inline: 0; }
 .sidebar-collapsed .sidebar-update-label { display: none; }
@@ -3414,14 +3437,16 @@ button.category-tag:hover:not(.is-editing) {
 .update-notes p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
 .update-summary > div { grid-template-columns: minmax(0, 1fr) minmax(0, 300px); }
 .mail-full-note { margin: 10px 0 0; color: var(--muted); font: 400 12px/1.7 var(--font-ui); overflow-wrap: anywhere; }
-.mail-full-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+.mail-full-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.mail-full-confirm .mail-full-actions { padding-bottom: 0; border-bottom: 0; }
 .mail-full-confirm { margin-top: 20px; padding: 18px 0; border-block: 1px solid var(--line-strong); font: 400 14px/1.7 var(--font-ui); }
 .mail-full-confirm h3 { margin: 0; font: 600 14px/1.5 var(--font-ui); }
 .mail-full-confirm > p { margin: 10px 0 0; }
 .mail-full-feedback { color: var(--danger); font: 400 13px/1.7 var(--font-ui); overflow-wrap: anywhere; }
 .mail-full-feedback p { margin: 12px 0 0; }
-.mail-full-status { margin-top: 20px; min-height: 30px; font: 500 13px/1.6 var(--font-ui); }
-.mail-full-state { display: inline-block; border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px 8px; }
+.mail-full-status { margin-left: auto; color: var(--muted); font: 400 13px/1.6 var(--font-ui); }
+.mail-full-state[data-mail-full-status="running"], .mail-full-state[data-mail-full-status="queued"] { color: var(--ink); }
+.mail-full-state[data-mail-full-status="failed"], .mail-full-state[data-mail-full-status="interrupted"] { color: var(--danger); }
 .mail-full-meta { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 12px 0 0; color: var(--muted); font: 400 12px/1.7 var(--font-ui); }
 .mail-full-meta > div { display: flex; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
 .mail-full-meta dd { margin: 0; overflow-wrap: anywhere; }
@@ -3454,7 +3479,9 @@ button.category-tag:hover:not(.is-editing) {
 .settings-exit-dialog .settings-exit-note { color: var(--muted); font-size: 12px; }
 .settings-exit-dialog footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
 @container settings (max-width: 540px) {
-  .mailbox-settings-summary > div { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  /* Name, state and button still fit on one line of a phone; only the version rows stack. */
+  .mailbox-settings-summary > div { gap: 8px 10px; }
+  .update-summary > div { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
 
 .settings-connection-check {
@@ -3466,28 +3493,29 @@ button.category-tag:hover:not(.is-editing) {
   padding-top: 16px;
 }
 
-.primary-currency-hint {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
 .service-addresses {
   display: grid;
-  gap: 12px;
-  margin: 16px 0 0;
+  margin: 0;
 }
 
 .service-addresses > div {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  align-items: center;
+  column-gap: 32px;
   min-width: 0;
+  min-height: 56px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
 }
 
 .service-addresses dt {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
+  color: var(--ink-soft);
+  font: 500 14px/1.5 var(--font-ui);
+}
+
+@container settings (max-width: 540px) {
+  .service-addresses > div { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
 }
 
 .service-addresses dd {
@@ -3591,11 +3619,67 @@ button.category-tag:hover:not(.is-editing) {
 .runtime-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; padding: 16px 0 0; }
 .runtime-feedback { flex: 1 1 240px; color: var(--ink-soft); font: 400 13px/1.8 var(--font-ui); }
 .runtime-feedback p { margin: 0; }
+
+/* Settings as cards: each group sits on a soft surface with its title inside, and rows are told apart by spacing
+   instead of rules, so the page reads as a few blocks rather than a stack of lines. */
+.settings-page { --settings-card: var(--surface-2); --settings-card-ring: rgb(255 255 255 / 4%); --settings-card-shadow: none; --settings-bar: var(--surface-3); }
+.settings-page .settings-form { gap: 16px; }
+.settings-page .settings-form > .settings-group,
+.settings-page .settings-form > .runtime-settings,
+.settings-page .settings-fold {
+  margin: 0;
+  padding: 18px 24px 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--settings-card);
+  box-shadow: 0 0 0 1px var(--settings-card-ring), var(--settings-card-shadow);
+}
+.settings-page .settings-group header,
+.settings-page .runtime-heading { align-items: center; padding-bottom: 6px; border-bottom: 0; }
+.settings-page .settings-group h2,
+.settings-page .runtime-heading h2,
+.settings-page .settings-fold-title { margin: 0; color: var(--ink); font: 600 16px/1.5 var(--font-ui); }
+.settings-page .field,
+.settings-page .setting-switch,
+.settings-page .financial-color-setting,
+.settings-page .mailbox-settings-summary > div,
+.settings-page .service-addresses > div,
+.settings-page .runtime-group,
+.settings-page .mail-full-actions { border: 0; }
+.settings-page .field { min-height: 56px; padding: 10px 0; }
+.settings-page .setting-switch { min-height: 58px; padding: 10px 0; }
+.settings-page .financial-color-setting { padding-bottom: 10px; }
+.settings-page .financial-color-setting .setting-switch { padding-bottom: 6px; }
+.settings-page .mailbox-settings-summary > div,
+.settings-page .service-addresses > div { min-height: 54px; padding: 8px 0; }
+.settings-page .mail-full-actions { padding: 8px 0 12px; }
+.settings-page .runtime-note { margin: 2px 0 4px; }
+.settings-page .runtime-group > summary { min-height: 44px; color: var(--ink-soft); font: 600 13px/1.5 var(--font-ui); }
+.settings-page .runtime-actions { padding: 10px 0 8px; }
+/* Advanced: the fold is one card; the groups inside it are sections of that card, not cards of their own. */
+.settings-page .settings-fold { padding-block: 4px; }
+.settings-page .settings-fold > summary { min-height: 64px; padding: 12px 0; }
+.settings-page .settings-fold-body { gap: 20px; padding: 0 0 12px; }
+.settings-page .settings-fold-body > .settings-group { padding: 0; background: none; box-shadow: none; border-radius: 0; }
+/* The save bar floats above the page as its own small card. */
+.settings-page .settings-form > .settings-save {
+  bottom: 12px;
+  padding: 12px 16px 12px 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--settings-bar);
+  box-shadow: 0 0 0 1px var(--settings-card-ring), 0 10px 28px rgb(0 0 0 / 35%);
+}
+.settings-page .settings-exit { padding-top: 8px; }
+@container settings (max-width: 540px) {
+  .settings-page .settings-form > .settings-group,
+  .settings-page .settings-form > .runtime-settings,
+  .settings-page .settings-fold { padding-inline: 16px; border-radius: 12px; }
+}
 @container settings (max-width: 560px) {
   .settings-page .field { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .settings-page .field > input,
   .settings-page .field > select,
-  .settings-page .field:has(> .primary-currency-hint) > select { grid-column: 1; grid-row: 2; }
   .settings-page .field > small,
   .settings-page .field > .runtime-field-error { grid-column: 1; grid-row: 3; }
 }

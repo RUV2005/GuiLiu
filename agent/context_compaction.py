@@ -1,11 +1,10 @@
-"""Budget-triggered compaction for persistent dialogue, before a ReAct request."""
+"""Budget-triggered compaction for every ReAct Agent (dialogue, automatic and stateless tasks)."""
 
-import copy
 import json
 import logging
 import re
 
-from context_manager import context_records
+from context_manager import compacted_context, context_records
 from make_prompt import ContextBudgetExceeded, estimate_input_tokens, make_prompt
 from tool import open_prompt
 
@@ -16,12 +15,19 @@ KEEP_RECENT_TURNS = 2
 MAX_SUMMARY_CALLS = 8
 
 
-def _compacted_context(context, cutoff, summary):
-    updated = copy.deepcopy(context)
-    updated["summary"] = {"content": summary, "through_sequence": cutoff}
-    for key in ("messages", "tool_results"):
-        updated[key] = [row for row in updated[key] if row["sequence"] > cutoff]
-    return updated
+def _cutoffs(context):
+    """Where compaction may stop, least summarized first: after an older turn (keeping up to two of them),
+    then after each finished step of the current turn (keeping the later steps word for word)."""
+    turn = context["turn_id"]
+    records = context_records(context)
+    ends = {}
+    for row in records:
+        if row["turn_id"] < turn:
+            ends[row["turn_id"]] = row["sequence"]
+    older = list(ends.values())
+    keep = min(KEEP_RECENT_TURNS, len(older) - 1) if older else 0
+    steps = [row["sequence"] for row in records if row["turn_id"] == turn and "tool_call_id" in row]
+    return older[len(older) - keep - 1:] + steps if older else steps
 
 
 def _summarize(payload, limits, counter, call_model, summary_budget):
@@ -70,7 +76,7 @@ def _summarize(payload, limits, counter, call_model, summary_budget):
 
 
 def prepare_context_prompt(manager, system_prompt, skill_prompt, limits, call_model, token_counter=None):
-    """Compact older complete turns if needed, then return a budget-checked prompt."""
+    """Compact older turns, then finished steps of the current turn, if needed; return a budget-checked prompt."""
     counter = token_counter or estimate_input_tokens
 
     def inspect(context):
@@ -80,35 +86,36 @@ def prepare_context_prompt(manager, system_prompt, skill_prompt, limits, call_mo
         except ContextBudgetExceeded as error:
             return None, error.estimated_input_tokens, error
 
+    budget = limits.input_token_budget
     original, before, budget_error = inspect(manager.context)
-    if before < limits.input_token_budget * TRIGGER_RATIO:
+    if before < budget * TRIGGER_RATIO:
         return original
     context = manager.context
-    older = [row for row in context_records(context) if row["turn_id"] < context["turn_id"]]
-    # Stateless tasks retain their existing behavior. Never compress a live tool call.
-    if manager.path is None or not older or context["call_state"].get("current_tool_call_id"):
+    cutoffs = _cutoffs(context)
+    # Without a snapshot directory there is nowhere to keep the originals. Never compress a live tool call.
+    if manager.snapshot_dir is None or not cutoffs or context["call_state"].get("current_tool_call_id"):
         if budget_error:
             raise budget_error
         return original
 
-    ends = {}
-    for row in older:
-        ends[row["turn_id"]] = row["sequence"]
-    boundaries = list(ends.values())
-    keep = min(KEEP_RECENT_TURNS, len(boundaries) - 1)
-    summary_budget = min(16384, max(64, limits.input_token_budget // 8))
-    while True:
-        cutoff = boundaries[len(boundaries) - keep - 1]
-        _, remaining, _ = inspect(_compacted_context(context, cutoff, ""))
-        if remaining + summary_budget <= limits.input_token_budget or keep == 0:
+    # Prefer the least compaction that brings the prompt and a summary back under the trigger, so the
+    # next step does not compact again; otherwise the least that fits the budget.
+    summary_budget = min(16384, max(64, budget // 8))
+    cutoff = fallback = None
+    for candidate in cutoffs:
+        _, remaining, _ = inspect(compacted_context(context, candidate, ""))
+        if remaining + summary_budget <= budget * TRIGGER_RATIO:
+            cutoff = candidate
             break
-        keep -= 1
-    if remaining + summary_budget > limits.input_token_budget:
-        raise ContextBudgetExceeded("Current turn and instructions leave no room for a summary; history was preserved")
+        if fallback is None and remaining + summary_budget <= budget:
+            fallback = candidate
+    cutoff = cutoff if cutoff is not None else fallback
+    if cutoff is None:
+        raise ContextBudgetExceeded("Instructions and the question leave no room for a summary; history was preserved")
 
     def summarize(payload):
         summary = _summarize(payload, limits, counter, call_model, summary_budget)
-        _, after, error = inspect(_compacted_context(context, cutoff, summary))
+        _, after, error = inspect(compacted_context(context, cutoff, summary))
         if error:
             raise error
         if after >= before:
@@ -118,6 +125,6 @@ def prepare_context_prompt(manager, system_prompt, skill_prompt, limits, call_mo
     snapshot = manager.compact(summarize, through_sequence=cutoff)
     package = make_prompt(system_prompt, skill_prompt, manager.context, limits, counter)
     log.info("Context compacted: session=%s turn=%s estimated_input=%s->%s budget=%s snapshot=%s",
-             manager.path.stem, context["turn_id"], before, package["estimated_input_tokens"],
-             limits.input_token_budget, snapshot)
+             (manager.path or manager.snapshot_dir).stem, context["turn_id"], before, package["estimated_input_tokens"],
+             budget, snapshot)
     return package

@@ -5,13 +5,12 @@ import { agentText, agentQuestions } from './agent-copy.js';
 import { historyToolbar, historyControls } from './agent-history-view.js';
 import { scrollDockMarkup } from './scroll-dock.js';
 import { themeSwitch } from './theme.js';
-import { runtimeDirty } from './runtime-settings-model.js';
 import { agentInformationView, taskCreateButton } from './agent-information-view.js';
 import { plansView } from './plans-view.js';
 import { overviewChartView, overviewHeatmapView, overviewCategoryDriversView } from './overview-chart.js';
 import { overviewAssetsView } from './overview-assets.js';
 import { runtimeSettingsView } from './runtime-settings-view.js';
-import { mailboxSettingsView } from './mailbox-settings.js';
+import { mailboxSettingsView, mailboxAlertView } from './mailbox-settings.js';
 import { updateSettingsView, updateEntryView } from './update-settings.js';
 import { sidebarProfileContent, userProfileSettings } from './user-profile.js';
 import { BUILD, isBetaBuild } from './build-info.js';
@@ -19,7 +18,6 @@ import { fullMailImportView } from './full-mail-import-view.js';
 import { shutdownSettingsView } from './system-shutdown.js';
 import { settingsSaveView } from './settings-save.js';
 import { reportScopeView, reportAccountLabel, comparisonLabels } from './report-scope.js';
-import { runtimeText } from './runtime-settings-copy.js';
 import { PRIMARY_CURRENCIES, normalizePrimaryCurrency } from './config.js';
 import { assetsView, assetModalContent } from './assets-view.js';
 import { INITIAL_TRANSACTION_ROWS, ESTIMATED_TRANSACTION_HEIGHT, transactionAdrState, todayTransactionDeals } from './ledger-model.js';
@@ -27,7 +25,6 @@ import { transactionCategoryIcon, categoryIconPickerMarkup } from './category-ic
 import { transactionAmountAttrs } from './transaction-amount.js';
 import {
   amountToJpy,
-  currencyName,
   dateInputValue,
   datetimeInputValue,
   dealHasAdr,
@@ -134,7 +131,6 @@ export function appShell(ctx) {
   const syncing = Boolean(state.syncing || state.refreshing);
   const refreshLabel = text(ctx, syncing ? 'syncing' : 'refreshSync');
   // Spending statistics are always JPY; assets follow the primary currency. Show both so the two bases are never confused.
-  const assetCurrency = currencyName(normalizePrimaryCurrency(state.settings.contextCurrency));
   const bodyClass = [
     "app-shell",
     state.settings.sidebarCollapsed ? "sidebar-collapsed" : "",
@@ -164,9 +160,10 @@ export function appShell(ctx) {
           navLink(ctx, "dev-system", "systemManagement") + "</nav>"
         : "") +
       '<div class="sidebar-footer">' +
+      '<div class="sidebar-update-host" data-mailbox-alert-host aria-live="polite">' + mailboxAlertView(ctx) + '</div>' +
       '<div class="sidebar-update-host" data-update-entry-host aria-live="polite">' + updateEntryView(ctx) + '</div>' +
       '<button class="profile-block" type="button" data-user-profile data-route-button="settings">' +
-      sidebarProfileContent(ctx, text(ctx, 'currencyBasis', { spend: 'JPY', asset: assetCurrency })) + '</button>' +
+      sidebarProfileContent(ctx) + '</button>' +
       '<div class="sidebar-actions">' +
       '<button class="icon-button sidebar-utility sidebar-refresh" type="button" data-refresh data-sidebar-refresh aria-busy="' + String(syncing) + '" title="' +
       escapeAttr(refreshLabel) + '" aria-label="' + escapeAttr(refreshLabel) + '"' + (syncing ? ' disabled' : '') + '>' +
@@ -701,40 +698,43 @@ function settingsView(ctx) {
   const { contextAccount, contextRange } = ctx.state.settings;
   const accounts = [...new Set(['all', ...(ctx.accounts || []).map(String), contextAccount].filter(Boolean))];
   const addresses = ctx.state.serviceAddresses;
-  return (
-    '<section class="page settings-page">' +
-    pageHeader(ctx, "settingsKicker", "settings", '', "") + userProfileSettings(ctx) +
-    '<form class="settings-form" data-settings-form novalidate><section class="settings-group" aria-labelledby="settings-appearance"><header><h2 id="settings-appearance">' +
+  // The report range and account (the toolbar's old filters) change most often; the primary currency rarely.
+  const scope = '<section class="settings-group" aria-labelledby="settings-scope"><header><h2 id="settings-scope">' + escapeHtml(text(ctx, 'dataScope')) +
+    '</h2><span class="settings-behavior">' + escapeHtml(text(ctx, 'settingsImmediate')) + '</span></header>' +
+    '<label class="field"><span>' + escapeHtml(text(ctx, 'scopeRange')) + '</span><select name="contextRange" data-context-range>' +
+    option('today', text(ctx, 'today'), contextRange) + option('month', text(ctx, 'thisMonth'), contextRange) +
+    option('7d', text(ctx, 'last7Days'), contextRange) + option('30d', text(ctx, 'last30Days'), contextRange) +
+    option('all', text(ctx, 'allTime'), contextRange) + '</select></label>' +
+    '<label class="field"><span>' + escapeHtml(text(ctx, 'scopeAccount')) + '</span><select name="contextAccount" data-context-account>' +
+    accounts.map((account) => option(account, reportAccountLabel(ctx, account), contextAccount)).join('') + '</select></label>' +
+    '<label class="field"><span>' + escapeHtml(text(ctx, 'primaryCurrency')) + '<small class="settings-behavior">' + escapeHtml(text(ctx, 'settingsOnSave')) + '</small></span><select name="contextCurrency">' +
+    PRIMARY_CURRENCIES.map((currency) => option(currency, text(ctx, 'primaryCurrency' + currency), normalizePrimaryCurrency(ctx.state.settings.contextCurrency))).join('') +
+    '</select></label></section>';
+  const appearance = '<section class="settings-group" aria-labelledby="settings-appearance"><header><h2 id="settings-appearance">' +
     escapeHtml(text(ctx, "settingsAppearance")) + '</h2><span class="settings-behavior">' + escapeHtml(text(ctx, 'settingsImmediate')) + '</span></header>' +
     '<label class="field"><span>' + escapeHtml(text(ctx, "language")) + '</span><select name="language" data-settings-language>' +
     option("zh", "中文", ctx.state.settings.language) + option("ja", "日本語", ctx.state.settings.language) +
     option("en", "English", ctx.state.settings.language) + "</select></label>" +
     themeSwitch(ctx.language, ctx.state.theme) +
+    // The colour preview below shows what the switch does.
     '<div class="financial-color-setting"><label class="setting-switch"><span><strong>' +
-    escapeHtml(text(ctx, 'financialColors')) + '</strong><small id="financial-colors-hint">' +
-    escapeHtml(text(ctx, 'financialColorsHint')) + '</small></span><input type="checkbox" name="financialColorsReversed" data-finance-colors aria-describedby="financial-colors-hint"' +
+    escapeHtml(text(ctx, 'financialColors')) + '</strong></span><input type="checkbox" name="financialColorsReversed" data-finance-colors aria-describedby="financial-colors-preview"' +
     (ctx.state.settings.financialColorsReversed === true ? ' checked' : '') + ' /><i class="switch-track" aria-hidden="true"><b></b></i></label>' +
-    '<div class="financial-color-preview"><span data-finance-tone="positive"><i aria-hidden="true"></i>' +
+    '<div class="financial-color-preview" id="financial-colors-preview"><span data-finance-tone="positive"><i aria-hidden="true"></i>' +
     escapeHtml(text(ctx, 'financialSurplus')) + '</span><span data-finance-tone="negative"><i aria-hidden="true"></i>' +
-    escapeHtml(text(ctx, 'financialDeficit')) + '</span></div></div>' +
-    '</section><section class="settings-group" aria-labelledby="settings-scope"><header><h2 id="settings-scope">' + escapeHtml(text(ctx, 'dataScope')) + '</h2></header>' +
-    '<label class="field"><span>' + escapeHtml(text(ctx, 'primaryCurrency')) + '<small class="settings-behavior">' + escapeHtml(text(ctx, 'settingsOnSave')) + '</small></span><select name="contextCurrency" aria-describedby="primary-currency-hint">' +
-    PRIMARY_CURRENCIES.map((currency) => option(currency, text(ctx, 'primaryCurrency' + currency), normalizePrimaryCurrency(ctx.state.settings.contextCurrency))).join('') +
-    '</select><small class="primary-currency-hint" id="primary-currency-hint">' + escapeHtml(text(ctx, 'primaryCurrencyHint')) + '</small></label>' +
-    '<label class="field"><span>' + escapeHtml(text(ctx, 'scopeRange')) + '<small class="settings-behavior">' + escapeHtml(text(ctx, 'settingsImmediate')) + '</small></span><select name="contextRange" data-context-range>' +
-    option('today', text(ctx, 'today'), contextRange) + option('month', text(ctx, 'thisMonth'), contextRange) +
-    option('7d', text(ctx, 'last7Days'), contextRange) + option('30d', text(ctx, 'last30Days'), contextRange) +
-    option('all', text(ctx, 'allTime'), contextRange) + '</select></label>' +
-    '<label class="field"><span>' + escapeHtml(text(ctx, 'scopeAccount')) + '<small class="settings-behavior">' + escapeHtml(text(ctx, 'settingsImmediate')) + '</small></span><select name="contextAccount" data-context-account>' +
-    accounts.map((account) => option(account, reportAccountLabel(ctx, account), contextAccount)).join('') +
-    '</select></label></section>' +
-    // Technical settings stay in the form (so saving and dirty checks still see them) but start collapsed.
-    '<details class="settings-fold" data-settings-fold' + (ctx.state.settingsFold === true || (ctx.state.runtimeSettings && runtimeDirty(ctx.state.runtimeSettings)) ? ' open' : '') +
-    '><summary><span><strong class="settings-fold-title">' + escapeHtml(text(ctx, 'settingsTechnical')) + '</strong><small>' +
-    escapeHtml(text(ctx, 'settingsTechnicalHint')) + '</small></span></summary><div class="settings-fold-body">' +
+    escapeHtml(text(ctx, 'financialDeficit')) + '</span></div></div></section>';
+  return (
+    '<section class="page settings-page">' +
+    pageHeader(ctx, "settingsKicker", "settings", '', "") +
+    // Ordered by how likely a change is: report scope, mailboxes, appearance, then updates and internals.
+    // The profile card first: the sidebar's avatar opens Settings, and it is short.
+    '<form class="settings-form" data-settings-form novalidate>' + userProfileSettings(ctx) + scope + mailboxSettingsView(ctx) + appearance +
+    updateSettingsView(ctx) + fullMailImportView(ctx) + runtimeSettingsView(ctx) +
+    // Service addresses, sync interval and developer mode stay in the form (so saving and dirty checks see them) but start folded.
+    '<details class="settings-fold" data-settings-fold' + (ctx.state.settingsFold === true ? ' open' : '') +
+    '><summary><span><strong class="settings-fold-title">' + escapeHtml(text(ctx, 'settingsTechnical')) + '</strong></span></summary><div class="settings-fold-body">' +
     '<section class="settings-group" aria-labelledby="settings-connections"><header><h2 id="settings-connections">' +
-    escapeHtml(text(ctx, 'settingsConnections')) + '</h2><span class="settings-behavior">' + escapeHtml(text(ctx, 'settingsOnSave')) + '</span></header><p class="runtime-note">' +
-    escapeHtml(runtimeText(ctx.language, addresses ? 'launcherHint' : 'localHint')) + '</p>' +
+    escapeHtml(text(ctx, 'settingsConnections')) + '</h2><span class="settings-behavior">' + escapeHtml(text(ctx, 'settingsOnSave')) + '</span></header>' +
     // Behind the paired local proxy the launcher fixes the services, so the addresses are shown, not edited.
     (addresses ? '<dl class="service-addresses">' + [['backend', 'backendAddress'], ['agent', 'agentAddress']].map(([key, label]) =>
       '<div><dt>' + escapeHtml(text(ctx, label)) + '</dt><dd data-service-address="' + key + '">' + escapeHtml(addresses[key] || '…') + '</dd></div>').join('') + '</dl>'
@@ -748,11 +748,10 @@ function settingsView(ctx) {
     '</select></label><div class="settings-connection-check"><div class="connection-results"><span>' +
     statusDot(ctx.state.status.backend) + escapeHtml(text(ctx, "backend")) + '</span><span>' +
     statusDot(ctx.state.status.agent, true) + 'Agent</span></div><button class="button" type="button" data-test-services>' +
-    escapeHtml(text(ctx, "testConnection")) + '</button></div></section>' + mailboxSettingsView(ctx) + fullMailImportView(ctx) + runtimeSettingsView(ctx) + updateSettingsView(ctx) +
+    escapeHtml(text(ctx, "testConnection")) + '</button></div></section>' +
     '<section class="settings-group" aria-labelledby="settings-advanced"><header><h2 id="settings-advanced">' +
     escapeHtml(text(ctx, 'settingsAdvanced')) + '</h2><span class="settings-behavior">' + escapeHtml(text(ctx, 'settingsOnSave')) + '</span></header><label class="setting-switch"><span><strong>' +
-    escapeHtml(text(ctx, "developerMode")) + '</strong><small>' + escapeHtml(text(ctx, "developerModeHint")) +
-    '</small></span><input type="checkbox" name="developerMode"' + (ctx.state.settings.developerMode ? " checked" : "") +
+    escapeHtml(text(ctx, "developerMode")) + '</strong></span><input type="checkbox" name="developerMode"' + (ctx.state.settings.developerMode ? " checked" : "") +
     ' /><i class="switch-track" aria-hidden="true"><b></b></i></label></section></div></details>' + settingsSaveView(ctx) + '</form>' + shutdownSettingsView(ctx) + '</section>'
   );
 }

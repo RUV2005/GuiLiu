@@ -41,12 +41,10 @@ function setup(ctx) {
         </div></section>
       <section class="import-step" aria-labelledby="import-step-account"><h2 id="import-step-account"><span aria-hidden="true">2</span>${h(t('stepAccount'))}</h2>
         <select class="import-account-select" data-import-form="account_number" aria-labelledby="import-step-account"${attr}>${opts([['', t('chooseAccount')]], s.form.account_number)}${accountOptions(ctx, s.form.account_number, s.accounts)}</select>
-        <p class="import-privacy">${h(t('accountHint'))}</p>
         ${s.setupLoaded && !s.accounts.length ? notice(ctx, 'noAccounts') : ''}
       </section>
     </div>
     <div class="import-start">
-      <p class="import-privacy">${h(t(s.form.use_agent ? 'agentOn' : 'agentOff'))}</p>
       <div class="import-upload-submit"><p id="import-start-hint" class="import-upload-hint" role="status"${missing ? '' : ' hidden'}>${missing ? h(t(missing)) : ''}</p>
         ${button('upload', t(s.busy || 'start'), Boolean(missing) || !s.setupLoaded || disabled, true, missing ? 'import-start-hint' : '')}</div>
     </div>
@@ -60,8 +58,6 @@ function setup(ctx) {
         <label>${h(t('sheet'))}<input data-import-form="sheet_name" value="${a(s.form.sheet_name)}"${attr}/></label>
       </div>
       <label class="import-check"><input type="checkbox" data-import-form="use_agent"${s.form.use_agent ? ' checked' : ''}${attr}/><span>${h(t('useAgent'))}</span></label>
-      <p class="import-privacy">${h(t('disclosure'))}</p>
-      <p class="import-privacy">${h(t('builtinCurrency'))}</p>
       <div class="button-row">${button('presets', t(s.presetOpen ? 'hideCustomFormat' : 'customFormat'), Boolean(s.busy || s.pendingCommit || s.editor))}</div>
     </details>`;
 }

@@ -40,7 +40,7 @@ export function candidateRowMarkup(source, saved, accounts, t) {
         ${source.review_reason && source.status !== 'skipped' ? `<details><summary>${e(t('showReason'))}</summary><div>${e(describeSetupError(t, source.review_reason, 'account_confirmation'))}</div></details>` : ''}
         <label class="setup-check" data-candidate-duplicate ${saved?.error === 'duplicateAccount' || d.confirm_duplicate ? '' : 'hidden'}><input type="checkbox" name="confirm_duplicate" ${d.confirm_duplicate ? 'checked' : ''}>${e(t('separateAccount'))}</label></td>
       <td class="setup-account-row-actions"><button type="button" class="setup-button" data-review-action="save-source" data-id="${e(source.source_id)}">${e(t('saveSource'))}</button>
-        <button type="button" class="setup-button" data-review-action="discard-source" data-id="${e(source.source_id)}">${e(t('cancel'))}</button></td></tr></tbody>`;
+        <button type="button" class="setup-button" data-review-action="discard-source" data-id="${e(source.source_id)}">${e(t('revertRow'))}</button></td></tr></tbody>`;
 }
 
 export function candidateTableMarkup(sources, drafts, accounts, t) {

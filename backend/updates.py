@@ -27,7 +27,7 @@ log = logging.getLogger("uvicorn.error.updates")
 DEFAULT_URL = "https://github.com/rhinoqvq/GuiLiu/releases/latest/download/latest.json"
 # The release key's public half; the private key stays with the publisher.
 PUBLIC_KEY = "gvxkT7EcdeL7RVz3mB2qPoLdKLDwUQdcagRomXkjbK4="
-PLATFORM = "win-x64"
+PLATFORM = "win-x64"   # copies whose RELEASE.json names no platform; Windows copies read latest.json since rc.12
 MAX_DOCUMENT = 256 * 1024
 MAX_PACKAGE = 300 * 1024 * 1024
 CHECK_TTL = 3600
@@ -52,7 +52,19 @@ def canonical(payload):
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def verified_payload(document, public_key=None):
+def release_platform(app):
+    try:
+        return str(json.loads((Path(app) / "RELEASE.json").read_text(encoding="utf-8")).get("platform") or PLATFORM)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return PLATFORM
+
+
+def manifest_url(platform):
+    """Each platform has its own signed file in the release: latest.json for Windows, latest-<platform>.json else."""
+    return DEFAULT_URL if platform == PLATFORM else DEFAULT_URL.replace("latest.json", f"latest-{platform}.json")
+
+
+def verified_payload(document, public_key=None, platform=PLATFORM):
     try:
         signature = base64.b64decode(document["signature"], validate=True)
         key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key or PUBLIC_KEY))
@@ -61,7 +73,7 @@ def verified_payload(document, public_key=None):
         raise UpdateError("signature") from None
     payload = document["payload"]
     app = payload.get("app") if isinstance(payload, dict) else None
-    if (not isinstance(app, dict) or payload.get("platform") != PLATFORM or not isinstance(app.get("url"), str)
+    if (not isinstance(app, dict) or payload.get("platform") != platform or not isinstance(app.get("url"), str)
             or not app["url"].startswith(("https://", "http://127.0.0.1", "http://localhost"))
             or not re.fullmatch(r"[0-9a-f]{64}", str(app.get("sha256", ""))) or not isinstance(app.get("size"), int)
             or not 0 < app["size"] <= MAX_PACKAGE or not isinstance(payload.get("runtime"), str)):
@@ -114,7 +126,8 @@ class Updater:
         self.app = Path(env["GUILIU_APP_DIR"]).resolve() if env.get("GUILIU_APP_DIR") else None
         self.version = env.get("GUILIU_VERSION") or ""
         self.control = env.get("GUILIU_CONTROL_DIR"), env.get("GUILIU_CONTROL_TOKEN")
-        self.url = env.get("GUILIU_UPDATE_URL") or DEFAULT_URL
+        self.platform = release_platform(self.app) if self.app else PLATFORM
+        self.url = env.get("GUILIU_UPDATE_URL") or manifest_url(self.platform)
         self.session = session
         # Only a release started through launch.py can switch versions.
         self.supported = bool(self.home and self.app and (self.home / "launch.py").is_file()
@@ -151,7 +164,7 @@ class Updater:
             document = json.loads(raw)
         except ValueError:
             raise UpdateError("invalid") from None
-        return verified_payload(document)
+        return verified_payload(document, platform=self.platform)
 
     def _read(self, name):
         try:

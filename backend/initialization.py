@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import io
 import json
 import logging
 import os
@@ -10,6 +11,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 from contextlib import closing
 from datetime import datetime, timezone
 from email.utils import parseaddr
@@ -30,7 +32,7 @@ from zhenze import BankMailRules, atomic_json, is_cash_withdrawal, sender_rule_n
 from assets_api import AccountCreate
 from bank_mail_discovery import bank_mail_filter_reason, mail_text, select_bank_samples
 from mail_access import (GmailImap, MailAccessError, MailClient, NetEaseMail, mail_config, mailbox_status,
-                         mailbox_identity, save_mail_config, gmail_authorized)
+                         mailbox_identity, save_mail_config, gmail_authorized, gmail_revoked, clear_gmail_revoked)
 
 STEPS = ("api_keys", "gmail", "vector_db", "bank_rules", "account_confirmation", "ocr_source", "complete")
 # A mailbox added from Settings: indexed and searched for banks in the background, then confirmed by the user.
@@ -139,6 +141,62 @@ class SetupSettings(BaseModel):
     openai_api_key: SecretStr | None = None
     google_client_id: str | None = Field(default=None, max_length=500)
     google_client_secret: SecretStr | None = None
+
+
+class UserProfileInput(BaseModel):
+    """What the user sets in Settings → Profile. A field left out stays as it is; null clears it."""
+    model_config = ConfigDict(extra="forbid")
+    display_name: str | None = Field(default=None, max_length=200)
+    avatar: str | None = Field(default=None, max_length=12_000_000)
+
+
+DISPLAY_NAME_MAX = 32
+AVATAR_SIDE = 256
+AVATAR_MAX_BYTES = 8 * 1024 * 1024
+AVATAR_PATTERN = re.compile(r"data:image/(?:png|jpeg|webp|gif);base64,([A-Za-z0-9+/=\s]+)")
+
+
+def clean_display_name(value):
+    """The name GUILIU and its AI call the user: one line, no control characters, at most DISPLAY_NAME_MAX."""
+    if value is None:
+        return None
+    text = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(value)))
+    text = "".join(ch for ch in text if unicodedata.category(ch)[0] != "C").strip()
+    if len(text) > DISPLAY_NAME_MAX:
+        raise SetupError(f"ID must be at most {DISPLAY_NAME_MAX} characters")
+    return text or None
+
+
+def normalized_avatar(data_url):
+    """A square AVATAR_SIDE WebP made from the uploaded picture. Re-encoding keeps only pixels, so nothing else the
+    file carried (metadata, scripts in an SVG-like payload, oversized frames) is ever stored or shown."""
+    match = AVATAR_PATTERN.fullmatch(data_url or "")
+    if not match:
+        raise SetupError("Avatar must be a PNG, JPEG, WebP or GIF image")
+    try:
+        raw = base64.b64decode(re.sub(r"\s+", "", match[1]), validate=True)
+    except ValueError:
+        raise SetupError("Avatar image could not be read") from None
+    if len(raw) > AVATAR_MAX_BYTES:
+        raise SetupError("Avatar image is too large")
+    from PIL import Image, ImageOps
+    try:
+        with Image.open(io.BytesIO(raw)) as probe:
+            if probe.width * probe.height > 40_000_000:
+                raise SetupError("Avatar image is too large")
+            probe.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            image = ImageOps.exif_transpose(image).convert("RGBA")
+            side = min(image.size)
+            left, top = (image.width - side) // 2, (image.height - side) // 2
+            image = image.crop((left, top, left + side, top + side)).resize((AVATAR_SIDE, AVATAR_SIDE), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            image.save(output, "WEBP", quality=88, method=6)
+    except SetupError:
+        raise
+    except Exception:
+        raise SetupError("Avatar image could not be read") from None
+    return "data:image/webp;base64," + base64.b64encode(output.getvalue()).decode("ascii")
 
 
 class SetupError(ValueError):
@@ -742,6 +800,7 @@ class Initialization:
                 updated["gmail"].update(mailbox=client.mailbox, uidvalidity=client.validity)
             finally:
                 client.close()
+            clear_gmail_revoked()   # Gmail accepted this app password
         self.settings(SetupSettings(google_client_id=request.google_client_id,
                                     google_client_secret=request.google_client_secret))
         if request.connect_provider == "gmail" and not gmail_imap and (from_settings or not self.gmail_status()["authorized"]):
@@ -910,11 +969,35 @@ class Initialization:
             # Gmail on an app password and 163 give no Google name, photo or ID; the address still names the account.
             config = mail_config()
             netease = (config.get("netease163") or {}).get("email") if "163" in config["providers"] else None
+            mine = read_json(self.root / "user_profile.json", {})
             return {"authorized": gmail["authorized"], "id": saved.get("id"),
                     "name": saved.get("name"), "picture": saved.get("picture"),
+                    # Set by the user in Settings; the name is also how the AI addresses them.
+                    "display_name": mine.get("display_name"), "avatar": mine.get("avatar"),
+                    "profile_updated_at": mine.get("updated_at"),
                     "email": gmail["email"], "updated_at": saved.get("updated_at"),
                     "mailbox_email": gmail["email"] or netease,
                     "needs_authorization": not bool(saved.get("id")), "oauth_available": oauth_available}
+
+    def update_user_profile(self, request):
+        """Save the ID and/or avatar the user set; fields left out of the request stay as they are."""
+        fields = request.model_fields_set
+        name = clean_display_name(request.display_name) if "display_name" in fields else None
+        avatar = normalized_avatar(request.avatar) if "avatar" in fields and request.avatar else None
+        with self.lock:
+            mine = read_json(self.root / "user_profile.json", {})
+            if "display_name" in fields:
+                mine["display_name"] = name
+            if "avatar" in fields:
+                mine["avatar"] = avatar
+            mine["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self.root.mkdir(parents=True, exist_ok=True)
+            atomic_json(self.root / "user_profile.json", mine)
+            os.chmod(self.root / "user_profile.json", 0o600)
+        return self.user_profile()
+
+    def display_name(self):
+        return read_json(self.root / "user_profile.json", {}).get("display_name")
 
     def authorize(self, *, purpose="initialization", connect_mailbox=False):
         with self.lock:
@@ -1007,7 +1090,8 @@ class Initialization:
                 raise SetupError("Changing the bound Gmail account requires a separate environment")
             old_token = read_json(self.token_path(), {})
             refresh_token = value.get("refresh_token")
-            if not refresh_token and previous.get("gmail_email") and old_token.get("client_id") == client["client_id"]:
+            if (not refresh_token and previous.get("gmail_email") and old_token.get("client_id") == client["client_id"]
+                    and not gmail_revoked(("oauth", old_token.get("refresh_token")))):
                 refresh_token = old_token.get("refresh_token")
             if not refresh_token:
                 raise SetupError("Google did not return a refresh token; authorize offline access again")
@@ -1035,6 +1119,7 @@ class Initialization:
                     raise SetupError("Mailbox selection is locked after vector import starts; use a separate environment", 409)
             atomic_json(self.token_path(), token)
             os.chmod(self.token_path(), 0o600)
+            clear_gmail_revoked()
             previous["gmail_email"] = email
             self.save_state(previous)
             atomic_json(self.root / "google_profile.json", saved_profile)

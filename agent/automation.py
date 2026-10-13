@@ -26,6 +26,7 @@ from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_database import agent_database_path, initialize_agent_database
 from runtime_settings import localized_task
+from user_address import address_guidance
 
 
 UTC = timezone.utc
@@ -272,8 +273,10 @@ class AutomationStore:
                 CREATE INDEX IF NOT EXISTS insight_updated ON AgentInsight(updated_at);
             """)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(AgentInsight)")}
+            # confirmed_at: when the user confirmed an item that needed confirmation (NULL until then).
             for name, definition in {"reply_state": "TEXT NOT NULL DEFAULT 'none'",
-                                     "reply_context": "TEXT", "reply": "TEXT NOT NULL DEFAULT '{}'"}.items():
+                                     "reply_context": "TEXT", "reply": "TEXT NOT NULL DEFAULT '{}'",
+                                     "confirmed_at": "TEXT"}.items():
                 if name not in columns:
                     conn.execute(f"ALTER TABLE AgentInsight ADD COLUMN {name} {definition}")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_unfinished_run ON AutomationRun(task_id) "
@@ -307,6 +310,8 @@ class AutomationStore:
                 value[key] = json.loads(value[key])
         if "is_read" in value:
             value["is_read"] = bool(value["is_read"])
+        if "confirmed_at" in value:
+            value["confirmed"] = value["confirmed_at"] is not None
         value.pop("reply_context", None)
         if "reply_state" in value:
             value["can_reply"] = value["reply_state"] == "waiting_reply"
@@ -500,7 +505,8 @@ class AutomationStore:
                 (id,fingerprint,data,task_id,run_id,session_id,turn_id,source_calls,created_at,updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fingerprint) DO UPDATE SET
                 data=excluded.data,task_id=excluded.task_id,run_id=excluded.run_id,session_id=excluded.session_id,
-                turn_id=excluded.turn_id,source_calls=excluded.source_calls,is_read=0,updated_at=excluded.updated_at""",
+                turn_id=excluded.turn_id,source_calls=excluded.source_calls,is_read=0,confirmed_at=NULL,
+                updated_at=excluded.updated_at""",
                 (ident, fingerprint, payload, source.get("task_id"), source.get("run_id"), source.get("session_id"),
                  source.get("turn_id"), json.dumps(source["source_calls"]), now, now))
             return {"action": "updated" if old else "created", "insight": self._decode(self._require(db, "AgentInsight", ident))}
@@ -524,9 +530,19 @@ class AutomationStore:
                               [*args, limit, offset]).fetchall()
             return {"items": [self._decode(row) for row in rows], "total": total, "unread_count": unread}
 
-    def insight(self, ident, is_read=None):
+    def insight(self, ident, is_read=None, confirmed=None):
+        """Read one item; optionally mark it read/unread, or confirm an item that needs confirmation (which also marks
+        it read) or take that back. Confirming does not answer a question the Agent is waiting on."""
         with self.transaction() as db:
             row = self._require(db, "AgentInsight", ident)
+            if confirmed is not None:
+                if json.loads(row["data"]).get("kind") != "pending_confirmation":
+                    raise AutomationError("Only items that need confirmation can be confirmed", 409)
+                when = stamp(utc_now()) if confirmed else None
+                db.execute("UPDATE AgentInsight SET confirmed_at=?" + (",is_read=1" if confirmed else "") + " WHERE id=?", (when, ident))
+                row["confirmed_at"] = when
+                if confirmed:
+                    row["is_read"] = 1
             if is_read is not None:
                 db.execute("UPDATE AgentInsight SET is_read=? WHERE id=?", (int(is_read), ident))
                 row["is_read"] = is_read
@@ -699,8 +715,10 @@ def _tool_sources(manager):
             for item in value:
                 collect(item)
 
-    for row in manager.context["tool_results"]:
-        if row["turn_id"] != manager.context["turn_id"] or row["tool_name"] not in allowed or row["status"] != "completed":
+    from context_manager import turn_records
+    # Steps already summarized in this turn still count as sources.
+    for row in turn_records(manager.context):
+        if "tool_call_id" not in row or row["tool_name"] not in allowed or row["status"] != "completed":
             continue
         try:
             try:
@@ -838,6 +856,9 @@ def execute_automation(run, scope, *, reply=None, resume_context=None, reply_to=
     factory = getattr(agent_module, AGENT_ENTRIES[config.agent_key]["factory"])
     agent, skill = factory(model=resume_context["call_state"]["resume_model"]) if resume_context else factory()
     deadline = time.monotonic() + AUTOMATION_TIMEOUT_SECONDS
+    # The total budget bounds one unattended execution: the first run, or one reply to its question.
+    # The run keeps the running total across both.
+    start = scope["token_estimate"]
 
     def check():
         if scope["stop"].is_set():
@@ -859,7 +880,7 @@ def execute_automation(run, scope, *, reply=None, resume_context=None, reply_to=
     def call_model(package, *, return_metadata=False):
         check()
         reserved = package["estimated_input_tokens"] + package["max_output_tokens"]
-        if scope["token_estimate"] + reserved > AUTOMATION_TOKEN_BUDGET:
+        if scope["token_estimate"] - start + reserved > AUTOMATION_TOKEN_BUDGET:
             raise ContextBudgetExceeded("Automation total token estimate budget exceeded")
         scope["token_estimate"] += reserved
         answer = original_call(package, return_metadata=return_metadata)
@@ -871,11 +892,22 @@ def execute_automation(run, scope, *, reply=None, resume_context=None, reply_to=
     # Give relative dates a clock without imposing a reporting period on the prompt.
     current_time = utc_now().astimezone(ZoneInfo(config.schedule.timezone)).isoformat()
     skill += f"\nCurrent time: {current_time}; timezone: {config.schedule.timezone}."
+    # Messages from automatic tasks address the user by the ID set in Settings, as dialogue does.
+    address = address_guidance()
+    if address:
+        skill += "\n" + address
     if resume_context:
         skill += "\nContinue the saved task using the user's new reply and existing observations. Do not restart it."
     return agent_module.run_agent_task(agent, reply if resume_context else config.prompt, AFName="automation:" + run["id"],
                                        U_or_A=False, skill_prompt=skill,
-                                       resume_context=resume_context, reply_to=reply_to)
+                                       resume_context=resume_context, reply_to=reply_to,
+                                       snapshot_dir=automation_snapshot_dir(run["id"]))
+
+
+def automation_snapshot_dir(run_id):
+    """Where a reply keeps the full earlier turn when it compacts it, beside dialogue snapshots."""
+    root = Path(os.getenv("ABK_CONTEXT_DIR") or Path(__file__).resolve().parent / "context_store")
+    return root.resolve() / "snapshots" / f"automation_{run_id}"
 
 
 class AutomationRuntime:

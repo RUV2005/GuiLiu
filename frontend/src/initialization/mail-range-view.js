@@ -1,8 +1,8 @@
-// Vector step mail filter: a date-range slider (all mail by default) and an optional custom search under "Advanced".
+// Vector step mail filter: a date-range slider (one year by default) and an optional custom search under "Advanced".
 // Once indexing has started the Backend keeps the first filter for every retry, so the step shows that filter instead.
 import { e, field } from './fields.js';
 import { localeFor } from '../i18n.js';
-import { MAIL_RANGES, ALL_MAIL_RANGE, rangeStart, describeQuery } from './model.js';
+import { MAIL_RANGES, DEFAULT_MAIL_RANGE, rangeStart, describeQuery } from './model.js';
 
 const STOPS = ['range3m', 'range6m', 'range1y', 'range2y', 'range3y', 'rangeAll'];
 const dateText = (language, date) => new Intl.DateTimeFormat(localeFor(language), { year: 'numeric', month: 'long', day: 'numeric' }).format(date);
@@ -15,7 +15,7 @@ function summary(t, language, range, custom) {
   return start ? t('rangeSummaryAfter').replace('{date}', dateText(language, start)) : t('rangeSummaryAll');
 }
 
-export function mailRangeMarkup(t, language, { providers, locked, range = ALL_MAIL_RANGE, custom = '' }) {
+export function mailRangeMarkup(t, language, { providers, locked, range = DEFAULT_MAIL_RANGE, custom = '' }) {
   if (locked !== null) {
     const saved = describeQuery(locked);
     const text = saved.kind === 'all' ? t('rangeSummaryAll')

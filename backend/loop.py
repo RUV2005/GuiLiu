@@ -742,6 +742,8 @@ def _run_selected_full_import(sources, mail_configs, ocr_mail_query, stop_event,
 class FullMailImport:
     """One explicit import job per Backend instance; persistent completion stays in DoneList."""
     ACTIVE = {"queued", "waiting", "running"}
+    # A stopped worker finishes the mail in hand first; one that does not stop within this time is ended.
+    CANCEL_GRACE = 30
 
     def __init__(self):
         self.context = multiprocessing.get_context("spawn")
@@ -749,6 +751,7 @@ class FullMailImport:
         self.process = None
         self.events = None
         self.stop_event = None
+        self.cancel_deadline = None
         self.task = {"task_id": None, "status": "idle", "scope": "inbox", "sources": [], "stage": None,
                      "created_at": None, "finished_at": None, "results": {}, "error": None}
 
@@ -756,6 +759,10 @@ class FullMailImport:
         if self.process is None:
             return
         alive = self.process.is_alive()
+        if alive and self.cancel_deadline is not None and time.monotonic() >= self.cancel_deadline:
+            self.process.terminate()
+            self.process.join(timeout=5)
+            alive = self.process.is_alive()
         while True:
             try:
                 event = self.events.get(timeout=0.05 if not alive else 0)
@@ -764,10 +771,16 @@ class FullMailImport:
             self.task.update(event)
         if not alive:
             self.process.join(timeout=0)
-            if self.task["status"] in self.ACTIVE:
+            if self.cancel_deadline is not None and self.task["status"] in self.ACTIVE | {"interrupted"}:
+                # Stopped by the user: mail already imported stays; the rest can be loaded again later.
+                self.task.update(status="cancelled", stage=None, error=None,
+                                 finished_at=datetime.now(timezone.utc).isoformat())
+            elif self.task["status"] in self.ACTIVE:
                 self.task.update(status="interrupted", stage=None,
                                  error="Import worker exited before completion",
                                  finished_at=datetime.now(timezone.utc).isoformat())
+            self.task.pop("cancelling", None)
+            self.cancel_deadline = None
             self.process.close()
             self.events.close()
             self.process = self.events = None
@@ -787,6 +800,7 @@ class FullMailImport:
                 raise Timeout("A full mail import is already running")
             self.stop_event = self.context.Event()
             self.events = self.context.Queue()
+            self.cancel_deadline = None
             self.task = {"task_id": uuid.uuid4().hex, "status": "queued", "scope": "inbox",
                          "sources": [name for name in ("bank_mail", "ocr_mail") if name in sources],
                          "stage": None, "created_at": datetime.now(timezone.utc).isoformat(),
@@ -803,6 +817,20 @@ class FullMailImport:
                 self.task.update(status="failed", error="Could not start full import worker",
                                  finished_at=datetime.now(timezone.utc).isoformat())
                 raise
+            return copy.deepcopy(self.task)
+
+    def cancel(self):
+        """The user stops the import. Returns at once with the task marked as stopping; the worker ends after the mail
+        in hand (or is ended after CANCEL_GRACE) and the task then reads "cancelled", which is never resumed by
+        itself."""
+        with self.lock:
+            self._refresh()
+            if self.process is None or self.task["status"] not in self.ACTIVE:
+                raise ValueError("No full mail import is running")
+            if self.cancel_deadline is None:
+                self.stop_event.set()
+                self.cancel_deadline = time.monotonic() + self.CANCEL_GRACE
+                self.task["cancelling"] = True
             return copy.deepcopy(self.task)
 
     def stop(self):
@@ -832,12 +860,14 @@ def settle_first_mail_import(initialization, task):
     with initialization.lock:
         state = initialization.state()
         record = dict(state.get("first_mail_import") or {})
-        if record.get("status") in (None, "done") or status in FullMailImport.ACTIVE or status == "idle":
+        if record.get("status") in (None, "done", "cancelled") or status in FullMailImport.ACTIVE or status == "idle":
             return record or None
         ours = record.get("status") == "running" and task.get("task_id") == record.get("task_id")
         covers = "bank_mail" in task.get("sources", []) and str(task.get("created_at") or "") >= str(record.get("since") or "")
         if status in {"completed", "completed_with_pending"} and (ours or covers):
             record.update(status="done", task_id=task.get("task_id"), finished_at=task.get("finished_at"))
+        elif status == "cancelled" and ours:
+            record.update(status="cancelled", finished_at=task.get("finished_at"))
         elif ours:
             record.update(status="failed" if status == "failed" else "interrupted",
                           failures=record.get("failures", 0) + (status == "failed"))
@@ -855,7 +885,7 @@ def start_first_mail_import(initialization, importer, mail_configs):
     DoneList keeps processed mail from being posted twice. Several tabs opening at once start it only once."""
     task = importer.status()
     record = settle_first_mail_import(initialization, task)
-    if (not record or record.get("status") == "done" or task.get("status") in FullMailImport.ACTIVE
+    if (not record or record.get("status") in {"done", "cancelled"} or task.get("status") in FullMailImport.ACTIVE
             or record.get("failures", 0) >= FIRST_IMPORT_FAILURES):
         return False, record
     try:

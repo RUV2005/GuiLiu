@@ -1,10 +1,12 @@
 import { createFullMailImportState, readFullMailImport, fullMailImportError, MAIL_SOURCES, MAIL_TERMINAL,
   mailImportActive, mailImportCanStart } from './full-mail-import-model.js';
 import { patchFullMailImport } from './full-mail-import-view.js';
+import { fullMailText } from './full-mail-import-copy.js';
 
 export function createFullMailImportController({ state, api, source, context, root = () => document,
   visible = () => !document.hidden, afterSettled = async () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, pollDelayMs = 2500, requestTimeoutMs = 15000 }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, pollDelayMs = 2500, requestTimeoutMs = 15000,
+  confirmAction = message => window.confirm(message) }) {
   const scopes = new Map(), mounted = new WeakSet(), refreshed = new Set();
   let epoch = 0, request, requestTimer, timer, entered = false;
 
@@ -129,6 +131,25 @@ export function createFullMailImportController({ state, api, source, context, ro
     if (current.busy === 'POST') return;
     current.confirming = false; patch(); root()?.querySelector('[data-mail-full-start]')?.focus({ preventScroll: true });
   }
+  // Stopping returns at once; the task reads "stopping" until the worker has finished the mail in hand.
+  async function stop() {
+    const current = activate();
+    if (!live(current) || current.busy || !mailImportActive(current.task) || current.task.cancelling) return false;
+    if (!confirmAction(fullMailText(context().language, 'stopConfirm'))) return false;
+    const version = epoch;
+    current.busy = 'STOP'; current.error = null; patch();
+    try {
+      const task = readFullMailImport(await api.cancelFullMailImport(current.source));
+      if (!live(current, version)) return false;
+      accept(current, task, 'GET');
+      return true;
+    } catch (error) {
+      if (live(current, version)) current.error = fullMailImportError(error);
+      return false;
+    } finally {
+      if (live(current, version)) { current.busy = ''; patch(); schedule(current); }
+    }
+  }
   function leave() { halt(); entered = false; }
   function mount() {
     if (state.route !== 'settings') { leave(); return; }
@@ -138,7 +159,7 @@ export function createFullMailImportController({ state, api, source, context, ro
     if (!mounted.has(host)) {
       mounted.add(host);
       host.addEventListener('click', event => {
-        for (const [key, action] of Object.entries({ start: askStart, confirm: start, back, refresh: load })) {
+        for (const [key, action] of Object.entries({ start: askStart, confirm: start, back, refresh: load, stop })) {
           const button = event.target.closest('[data-mail-full-' + key + ']');
           if (button && !button.disabled) { event.preventDefault(); void action(); break; }
         }
@@ -148,5 +169,5 @@ export function createFullMailImportController({ state, api, source, context, ro
     if (!entered && visible()) { entered = true; void load(); }
   }
   activate();
-  return { activate, mount, patch, leave, load, askStart, start, back };
+  return { activate, mount, patch, leave, load, askStart, start, back, stop };
 }

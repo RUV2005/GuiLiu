@@ -304,6 +304,15 @@ export function createAgentInformationController({ state, api, context, changed 
       await insights(true);
     });
   }
+  // Confirming an item that needed confirmation also marks it read; it can be taken back.
+  async function markConfirmed(id, confirmed) {
+    await mutate('confirm', async (client, s) => {
+      const item = replies.observe(informationResult(await client.setAgentInsightConfirmed(id, confirmed)), s);
+      if (!valid(s)) return;
+      if (s.insightId === id) s.insight = item;
+      await insights(true);
+    });
+  }
   async function loadRun(id, quiet = false) {
     if (!quiet) current().runError = '';
     return read('run', (client, options) => client.getAutomationRun(id, options), (response, s) => {
@@ -562,6 +571,7 @@ export function createAgentInformationController({ state, api, context, changed 
     if (action === 'close-run') return closeRun();
     if (action === 'retry-run-detail' && s.runOpen && s.runId === id) return loadRun(id);
     if (action === 'read') return markRead(id, !s.insight?.is_read);
+    if (action === 'confirm') return markConfirmed(id, !s.insight?.confirmed);
     if (action === 'deal') return read('deal', async () => api.getDeal(id), response => { openDeal(normalizeDeal(informationResult(response))); });
     if (action === 'insights-retry') {
       s.insightFeed.error = '';
@@ -608,7 +618,7 @@ export function createAgentInformationController({ state, api, context, changed 
   }
   const events = [['click',click],['input',input],['change',change],['submit',submit],['scroll',scroll,true],['visibilitychange',visibility],['cancel',cancel,true],['pointerdown',pointerDown],['keydown',modalKeydown]];
   events.forEach(([name, handler, options]) => doc?.addEventListener(name, handler, options));
-  return { mount, patch, refresh, paint, selectTask, selectInsight, closeInsight, askAgent, editTask, saveTask, runTask, deleteTask, showRun, closeRun, pollRuns, tick, openWaiting, replies, setInsightFilter,
+  return { mount, patch, refresh, paint, selectTask, selectInsight, closeInsight, askAgent, markConfirmed, editTask, saveTask, runTask, deleteTask, showRun, closeRun, pollRuns, tick, openWaiting, replies, setInsightFilter,
     loadMoreInsights: () => insights(false, true),
     dispose() { disposed = true; replies.dispose(); periodRuler.dispose(); doc?.querySelector('[data-task-dialog][open]')?.close(); doc?.querySelector('[data-run-dialog][open]')?.close(); win?.clearTimeout(timer); win?.cancelAnimationFrame?.(fillFrame); requests.forEach(controller => controller.abort()); events.forEach(([name,handler,options]) => doc?.removeEventListener(name,handler,options)); } };
 }

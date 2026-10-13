@@ -5,6 +5,7 @@ import re
 import sqlite3
 import time
 from contextlib import closing
+from datetime import datetime, timedelta
 from email.utils import parseaddr
 from pathlib import Path
 
@@ -98,6 +99,18 @@ def apply_bank_action(conn, msgid, account_number, mail_type, fields, decision, 
     return assets.run_operation(conn, "bank-mail:" + msgid, "bank_mail.post", source, post)
 
 
+GMAIL_API_ID = re.compile(r"[0-9a-f]{12,20}")
+TWIN_WINDOW = timedelta(minutes=3)
+
+
+def mail_connection(msgid):
+    """Which way Gmail gave this mail ID: "api" (Google sign-in) or "imap" (app password); None for anything else."""
+    value = str(msgid or "")
+    if value.startswith("gimap_"):
+        return "imap"
+    return "api" if GMAIL_API_ID.fullmatch(value) else None
+
+
 class BankMailProcessor:
     def __init__(self, db, agent_url, bank_name, sender, account_number, *, rules_dir=None, state_path=None, agent_call=None, account_ref=""):
         self.db, self.agent_url = db, agent_url
@@ -155,6 +168,35 @@ class BankMailProcessor:
                 ("SELECT 1 FROM AssetOperation WHERE OperationID=? LIMIT 1", "bank-mail:" + msgid),
             )
             return any(conn.execute(sql, (value,)).fetchone() for sql, value in queries)
+
+    def _posted_another_way(self, msgid, fields):
+        """The debit this mail reports, already posted from the same mail reached another way. DoneList keeps one
+        connection from posting a mail twice, but Google sign-in and an app password give that mail different IDs,
+        so after switching, recent mail looks new. A transaction on this account with the same amount within three
+        minutes, posted from the other connection or before mail IDs were kept, is that mail; one from this same
+        connection is a different mail (DoneList saw to that) and is never matched."""
+        here = mail_connection(msgid)
+        if here is None:
+            return None
+        minute = lambda value: datetime.fromisoformat(str(value)[:16])   # wall time to the minute, as both store it
+        try:
+            when = minute(fields["time"])
+        except (KeyError, ValueError):
+            return None
+        days = ((when - timedelta(days=1)).date().isoformat(), (when + timedelta(days=1)).date().isoformat())
+        with closing(sqlite3.connect(self.db.DBname, timeout=10)) as conn:
+            rows = conn.execute("""SELECT DealingNumber, msgid, ISOtime FROM DealingData WHERE AccountNumber=? AND price=?
+                AND substr(ISOtime, 1, 10) BETWEEN ? AND ?""", (self.account_number, str(fields["amount"]), *days)).fetchall()
+        for number, other, iso in rows:
+            # Receipts (ocr:…) and 163 mail are other sources, not this mail reached another way.
+            if mail_connection(other) == here or (other not in (None, "") and mail_connection(other) is None):
+                continue
+            try:
+                if abs(minute(iso) - when) <= TWIN_WINDOW:
+                    return number
+            except ValueError:
+                continue
+        return None
 
     def _done(self, msgid):
         # DBmanage's legacy writer swallows SQLite errors; this path must not.
@@ -277,6 +319,13 @@ class BankMailProcessor:
         if kind == "debit":
             if fields["currency"] != code or code not in {"JPY", "CNY"}:
                 raise ValueError("Debit currency needs confirmed settlement before using the existing billing flow")
+            twin = self._posted_another_way(msgid, fields)
+            if twin is not None:
+                self._done(msgid)
+                record.update(status="already_recorded", twin=twin, retry_at=0, attempts=0)
+                self._update(msgid, record)
+                print(f"Bank mail {msgid}: already posted as #{twin} from the other Gmail connection")
+                return None
             record.update(status="debit", retry_at=0, attempts=0)
             self._update(msgid, record)
             return {"text": body, "fields": fields, "bank_name": self.rules.bank_name}

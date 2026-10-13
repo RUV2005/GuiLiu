@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from service_auth import ServiceAuthMiddleware
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from dashscope import MultiModalConversation
 import base64
 from agent import (
@@ -478,7 +478,14 @@ def automation_run(run_id: str):
 
 
 class InsightReadRequest(StrictModel):
-    is_read: bool
+    is_read: bool | None = None
+    confirmed: bool | None = None
+
+    @model_validator(mode="after")
+    def something_to_change(self):
+        if self.is_read is None and self.confirmed is None:
+            raise ValueError("Give is_read or confirmed")
+        return self
 
 
 class InsightReplyRequest(StrictModel):
@@ -506,7 +513,7 @@ def get_agent_insight(insight_id: str):
 
 @app.patch("/agent/insights/{insight_id}", tags=["Agent information"])
 def mark_agent_insight(insight_id: str, req: InsightReadRequest):
-    return automation_response(lambda: app.state.automation_store.insight(insight_id, req.is_read))
+    return automation_response(lambda: app.state.automation_store.insight(insight_id, req.is_read, req.confirmed))
 
 
 @app.post("/agent/adr/enrich", response_model=ADR_Response_structure)

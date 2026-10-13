@@ -31,7 +31,7 @@ from loop import LoopScheduler, FullMailImport, settle_first_mail_import, start_
 from updates import UpdateError, Updater
 from fastapi import Depends, HTTPException, Request
 from initialization import (Initialization, StepRequest, SetupError, bootstrap_database,
-                            runtime_allowed, bank_sources, MailSetupInput, BankInput)
+                            runtime_allowed, bank_sources, MailSetupInput, BankInput, UserProfileInput)
 from system_control import ShutdownController, ShutdownRequest, require_local_control, exit_service
 from oauth_callback_page import callback_language, callback_page
 from service_auth import ServiceAuthMiddleware, agent_requests
@@ -228,6 +228,20 @@ def user_profile(setup=Depends(local_initialization)):
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
+@app.put("/user/profile", tags=["User profile"])
+def update_user_profile(payload: UserProfileInput, setup=Depends(local_initialization)):
+    result = setup_response(lambda: setup.update_user_profile(payload))
+    if isinstance(result, JSONResponse):
+        return result
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/user/profile/name", tags=["User profile"])
+def user_profile_name(setup=Depends(local_initialization)):
+    """How the AI addresses the user (the ID set in Settings), without the avatar."""
+    return {"success": True, "result": {"display_name": setup.display_name()}, "error": None, "status_code": 200}
+
+
 @app.post("/user/profile/authorize", tags=["User profile"])
 def authorize_user_profile(setup=Depends(local_initialization)):
     return setup_response(lambda: setup.authorize(purpose="profile"))
@@ -313,6 +327,16 @@ def full_mail_import_status(request: Request):
     return {"success": True, "result": task, "error": None, "status_code": 200}
 
 
+@app.post("/mail-imports/full/cancel", tags=["Mail import"], dependencies=[Depends(local_initialization)])
+def cancel_full_mail_import(request: Request):
+    """Stop the running import; it reads "cancelled" once the mail in hand is finished. Imported mail stays."""
+    try:
+        task = request.app.state.full_mail_import.cancel()
+    except ValueError as error:
+        return JSONResponse({"success": False, "result": None, "error": str(error), "status_code": 409}, status_code=409)
+    return {"success": True, "result": task, "error": None, "status_code": 200}
+
+
 @app.post("/mail-imports/full/first", tags=["Mail import"], dependencies=[Depends(local_initialization)])
 def start_first_full_mail_import(request: Request):
     """Called by the workspace on every load. The first visit after setup imports the whole mailbox (bank and image
@@ -321,7 +345,7 @@ def start_first_full_mail_import(request: Request):
     record = state.get("first_mail_import")
     if not runtime_allowed() or state.get("active_step") or state.get("vector_sync", {}).get("status") == "running":
         # Like a manual start, it waits for setup's background indexing; the workspace asks again later.
-        waiting = runtime_allowed() and bool(record) and record.get("status") != "done"
+        waiting = runtime_allowed() and bool(record) and record.get("status") not in {"done", "cancelled"}
         return {"success": True, "result": {"started": False, "waiting": waiting, "first_import": record},
                 "error": None, "status_code": 200}
     try:

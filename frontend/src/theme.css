@@ -81,6 +81,11 @@
 :root[data-theme="light"] .status-button.is-active { color: var(--positive); border-color: #b0cbb9; }
 :root[data-theme="light"] .toast.is-success { border-color: #99bea6; }
 :root[data-theme="light"] .toast.is-error { border-color: #d9a4b0; }
+/* Settings cards: white on the light grey page, held by a faint edge and shadow instead of dividers. */
+:root[data-theme="light"] .settings-page { --settings-card: #ffffff; --settings-card-ring: rgb(15 23 42 / 7%); --settings-card-shadow: 0 1px 2px rgb(15 23 42 / 4%); --settings-bar: #ffffff; }
+/* Agent prompts and tasks: white cards with a faint edge, as in Settings. */
+:root[data-theme="light"] .information-workspace { --information-card: #ffffff; --information-card-ring: rgb(15 23 42 / 7%); }
+:root[data-theme="light"] .settings-page .settings-form > .settings-save { box-shadow: 0 0 0 1px var(--settings-card-ring), 0 10px 28px rgb(15 23 42 / 12%); }
 :root[data-theme="light"] .modal-backdrop { background: rgba(38, 45, 56, .3); }
 :root[data-theme="light"] .category-icon-backdrop { background: rgba(38, 45, 56, .18); }
 

@@ -5,15 +5,18 @@ import { MAIL_COUNTERS, createFullMailImportState, mailImportActive, mailImportC
 export function fullMailImportView(ctx) {
   const state = ctx.state.fullMailImport || createFullMailImportState(''), text = key => fullMailText(ctx.language, key);
   const task = state.task, active = mailImportActive(task);
-  const status = state.busy === 'POST' ? 'starting' : task?.status || (state.busy ? 'loading' : 'unknown');
+  const status = state.busy === 'POST' ? 'starting' : task?.cancelling || state.busy === 'STOP' ? 'cancelling'
+    : task?.status || (state.busy ? 'loading' : 'unknown');
   const errors = [state.startError, state.error].filter(Boolean).map(error => text(error.key) + (error.detail ? ' ' + error.detail : ''));
   const notice = value => value ? '<p class="mail-full-note">' + e(value) + '</p>' : '';
   return '<section class="settings-group mail-full-settings" data-full-mail-import aria-labelledby="settings-full-mail"><header><h2 id="settings-full-mail">' +
-    e(text('title')) + '</h2><span class="settings-behavior">' + e(text('independent')) + '</span></header>' +
-    notice(text('dedup')) + notice(text('savedConfig')) +
+    e(text('title')) + '</h2></header>' +
     (state.available === true && task?.scope !== 'inbox' ? '<p class="mail-full-feedback">' + e(text('scopeUnavailable')) + '</p>' : '') +
     '<div class="mail-full-actions"><button class="button" type="button" data-mail-full-start' + (!mailImportCanStart(state) || state.confirming ? ' disabled' : '') + '>' +
-      e(text('start')) + '</button><button class="button" type="button" data-mail-full-refresh' + (state.busy ? ' disabled' : '') + '>' + e(text('refresh')) + '</button></div>' +
+      e(text('start')) + '</button><button class="button" type="button" data-mail-full-refresh' + (state.busy ? ' disabled' : '') + '>' + e(text('refresh')) + '</button>' +
+    (active ? '<button class="button" type="button" data-mail-full-stop' + (state.busy || task.cancelling ? ' disabled' : '') + '>' + e(text('stop')) + '</button>' : '') +
+    '<span class="mail-full-status" role="status" aria-live="polite"><span class="mail-full-state" data-mail-full-status="' + a(task?.status || 'unknown') + '">' +
+    e(text(status)) + (task?.stage && active && status !== 'cancelling' ? ' · ' + e(text(task.stage)) : '') + '</span></span></div>' +
     (state.confirming ? '<div class="mail-full-confirm" role="group" aria-labelledby="mail-full-confirm-title"><h3 id="mail-full-confirm-title">' +
       e(text('confirmTitle')) + '</h3><p>' + e(text('warning')) + '</p>' +
       (state.uncertain ? notice(text('uncertain')) : '') + '<div class="mail-full-actions"><button class="button primary" type="button" data-mail-full-confirm' +
@@ -21,8 +24,6 @@ export function fullMailImportView(ctx) {
       (state.busy === 'POST' ? ' disabled' : '') + '>' + e(text('back')) + '</button></div></div>' : '') +
     '<div class="mail-full-feedback" role="alert">' + errors.map(message => '<p>' + e(message) + '</p>').join('') + '</div>' +
     (state.uncertain && !state.confirming ? notice(text('uncertain')) : '') + notice(state.notice ? text(state.notice) : '') +
-    '<div class="mail-full-status" role="status" aria-live="polite"><span class="mail-full-state" data-mail-full-status="' + a(task?.status || 'unknown') + '">' +
-    e(text(status)) + (task?.stage && active ? ' · ' + e(text(task.stage)) : '') + '</span></div>' +
     (active ? notice(text('leaveHint')) : '') +
     (task?.status === 'completed_with_pending' ? notice(text('pendingHint')) : '') +
     (['failed', 'interrupted'].includes(task?.status) ? notice(text('failureHint')) : '') +

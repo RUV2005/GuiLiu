@@ -20,6 +20,7 @@ from pathlib import Path
 from itertools import zip_longest
 
 from filelock import FileLock
+from google.auth.exceptions import RefreshError
 from Gmail_Manage import gmailM
 from runtime_settings import server_data_path
 from zhenze import atomic_json
@@ -30,6 +31,8 @@ _gmail_lock = threading.RLock()
 ID_PATTERN = re.compile(r"n163_([0-9a-f]{24})_(inbox|f[0-9a-f]{8})_(\d+)_(\d+)")
 GMAIL_ID_PATTERN = re.compile(r"gimap_([0-9a-f]{24})_(\d+)_(\d+)")
 MAX_MAIL_BYTES = 50 * 1024 * 1024
+# A grant Google revoked stays revoked, so while it is on record Gmail is asked again only this often.
+GMAIL_REVOKED_RECHECK = 1800
 
 
 class MailAccessError(ValueError):
@@ -49,13 +52,18 @@ def account_key(email):
     return hashlib.sha256(email.lower().encode()).hexdigest()[:24]
 
 
-def gmail_authorized():
+def gmail_token():
     path = Path(os.getenv("ABK_GMAIL_TOKEN_FILE", str(Path(__file__).parent / "token.json")))
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except (OSError, ValueError):
-        return False
-    return bool(data.get("refresh_token") and data.get("client_id"))
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def gmail_authorized():
+    data = gmail_token()
+    return bool(data.get("refresh_token") and data.get("client_id")) and not gmail_revoked(("oauth", data.get("refresh_token")))
 
 
 def gmail_method(config=None):
@@ -64,13 +72,71 @@ def gmail_method(config=None):
     return "imap" if (data.get("gmail") or {}).get("method") == "imap" else "oauth"
 
 
+def gmail_credential(config=None):
+    """(method, secret) Gmail connects with: the saved OAuth grant, or the app password over IMAP."""
+    data = mail_config() if config is None else config
+    if gmail_method(data) == "imap":
+        return "imap", (data.get("gmail") or {}).get("app_password")
+    return "oauth", gmail_token().get("refresh_token")
+
+
+def _fingerprint(credential):
+    method, secret = credential
+    return hashlib.sha256(f"{method}\0{secret}".encode()).hexdigest()[:16] if secret else None
+
+
+def _revoked_path():
+    return server_data_path("mail/gmail-revoked.json")
+
+
+def is_revoked_grant(error):
+    """Google refused the saved credential itself: HTTP 400 invalid_grant for the OAuth grant (the Google password
+    changed, GUILIU's access was removed, or it expired), or a rejected app password over IMAP (changing the Google
+    password revokes app passwords too). Network trouble and 5xx answers are other errors."""
+    return ((isinstance(error, RefreshError) and "invalid_grant" in str(error))
+            or (isinstance(error, MailAccessError) and str(error) == GmailImap.ERRORS["login"]))
+
+
+def gmail_revoked(credential=None):
+    """The record of Google refusing the saved Gmail credential ({"since", "checked"}), or None while it works.
+    Reconnecting saves a new grant or app password, which the record no longer matches."""
+    fingerprint = _fingerprint(credential or gmail_credential())
+    try:
+        record = json.loads(_revoked_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if fingerprint and isinstance(record, dict) and record.get("token") == fingerprint else None
+
+
+def note_gmail_revoked(credential):
+    fingerprint = _fingerprint(credential)
+    if not fingerprint:
+        return
+    record = gmail_revoked(credential)
+    if record is None:
+        log.warning("Gmail refused the saved %s credential; reconnect Gmail in Settings", credential[0])
+        record = {"token": fingerprint, "since": time.time()}
+    record["checked"] = time.time()
+    path = _revoked_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(path, record)
+
+
+def clear_gmail_revoked():
+    _revoked_path().unlink(missing_ok=True)
+
+
 def mailbox_status():
     data = mail_config()
     selected = data["providers"]
     netease, gmail = data.get("netease163", {}), data.get("gmail") or {}
     imap = gmail_method(data) == "imap"
+    revoked = gmail_revoked(gmail_credential(data))
     accounts = [{"provider": "gmail", "method": "imap" if imap else "oauth", **({"email": gmail.get("email")} if imap else {}),
-                 "authorized": bool(gmail.get("app_password")) if imap else gmail_authorized(), "selected": "gmail" in selected},
+                 "authorized": bool(gmail.get("app_password")) and not revoked if imap else gmail_authorized(),
+                 "selected": "gmail" in selected,
+                 # Gmail refused the saved credential (since this time): Settings asks to reconnect Gmail.
+                 **({"revoked_at": revoked["since"]} if revoked else {})},
                 {"provider": "163", "email": netease.get("email"),
                  "authorized": bool(netease.get("authorization_code")), "selected": "163" in selected,
                  # Measured when the account was last verified (see NetEaseMail.inbox_reach).
@@ -704,12 +770,17 @@ class MailClient:
     def _client(self, provider):
         if provider not in self.config["providers"]:
             raise MailAccessError("Mailbox is not enabled")
-        if provider == "gmail" and gmail_method(self.config) == "oauth":
+        credential = gmail_credential(self.config) if provider == "gmail" else None
+        revoked = gmail_revoked(credential) if credential else None
+        if revoked and time.time() - revoked.get("checked", 0) < GMAIL_REVOKED_RECHECK:
+            raise MailAccessError("Gmail no longer accepts the saved credential; reconnect Gmail in Settings")
+        if provider == "gmail" and credential[0] == "oauth":
             # The legacy client stores its Google service globally.
             with _gmail_lock:
                 client = gmailM(self.query)
                 client.connect_gmail()
-                yield client
+                with self._watch(credential, revoked):
+                    yield client
             return
         if provider == "gmail":
             account = self.config.get("gmail") or {}
@@ -722,9 +793,23 @@ class MailClient:
                 raise MailAccessError("163 authorization is required")
             client = NetEaseMail(account, self.query)
         try:
-            yield client
+            with self._watch(credential, revoked):
+                yield client
         finally:
             client.close()
+
+    @staticmethod
+    @contextmanager
+    def _watch(credential, revoked):
+        """Record Gmail refusing the saved credential, and forget the record once it works again."""
+        try:
+            yield
+        except Exception as error:
+            if credential and is_revoked_grant(error):
+                note_gmail_revoked(credential)
+            raise
+        if revoked:
+            clear_gmail_revoked()
 
     @staticmethod
     def provider_for(msgid):

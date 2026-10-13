@@ -50,20 +50,22 @@ function pager(ctx, offset, total, prefix, loading) {
   return '<div class="information-pagination"><span>' + (total ? offset + 1 : 0) + '–' + Math.min(offset + 20, total) + ' / ' + total + ' ' + h(text(ctx, 'total')) + '</span><div class="button-row">' +
     button(ctx, 'previous', prefix + '-previous', '', loading || offset === 0) + button(ctx, 'next', prefix + '-next', '', loading || offset + 20 >= total) + '</div></div>';
 }
+// An item that needed confirmation reads as confirmed once the user confirmed it.
+const confirmedKind = item => item.data?.kind === 'pending_confirmation' && item.confirmed ? 'confirmedState' : item.data?.kind || '';
 function insightList(ctx) {
   const s = model(ctx);
   const feed = s.insightFeed, busy = s.loading.insights || feed.loadingMore;
   const rows = s.insights.map(item => '<div class="information-list-entry" data-selected="' + (s.insightId === item.id) + '" data-insight-entry="' + a(item.id) + '"><button type="button" class="information-list-item" data-information-action="insight" data-id="' + a(item.id) + '" aria-current="' + (s.insightId === item.id) + '">' +
     // Unread is a dot and a heavier title inside the button (the list patcher refreshes button contents only); the
     // words stay for screen readers.
-    '<span class="information-insight-meta" data-kind="' + a(item.data?.kind || '') + '"><span class="information-list-meta">' + h(text(ctx, item.data?.kind)) + '</span><time title="' + a(item.updated_at || '') + '">' + h(informationListTime(item.updated_at, ctx.language)) + '</time></span>' +
+    '<span class="information-insight-meta" data-kind="' + a(confirmedKind(item)) + '"><span class="information-list-meta">' + h(text(ctx, confirmedKind(item))) + '</span><time title="' + a(item.updated_at || '') + '">' + h(informationListTime(item.updated_at, ctx.language)) + '</time></span>' +
     '<strong class="information-insight-title" data-unread="' + !item.is_read + '">' + h(item.data?.title) + '</strong>' +
     '<span class="information-sr">' + h(text(ctx, item.is_read ? 'read' : 'unread')) + '</span>' +
     (replyBadge(ctx, item) ? '<span class="information-insight-bottom">' + replyBadge(ctx, item) + '</span>' : '') + '</button></div>').join('');
   const end = feed.error ? '<p role="alert">' + h(text(ctx, feed.error)) + '</p>' + button(ctx, 'retry', 'insights-retry', '', busy) :
     busy ? '<span class="information-feed-loading" role="status">' + h(text(ctx, 'loading')) + '</span>' :
     !s.insights.length ? empty(ctx, s.insightsLoaded ? 'emptyInsights' : 'selectInsight') :
-    '<span>' + h(text(ctx, feed.hasMore ? 'scrollForMore' : 'allInsightsLoaded')) + '</span>';
+    feed.hasMore ? '' : '<span>' + h(text(ctx, 'allInsightsLoaded')) + '</span>';
   return '<div class="information-feed-count" data-insight-feed-count><span>' + s.insights.length + ' / ' + s.total + ' ' + h(text(ctx, 'total')) + '</span></div>' +
     '<div class="information-list information-insight-list" data-insight-scroll data-filter="' + a(JSON.stringify(s.filter)) + '" tabindex="0" aria-label="' + a(text(ctx, 'existingInsights')) + '" aria-busy="' + Boolean(busy) + '">' + rows +
     '<div class="information-feed-end" data-insight-feed-end>' + end + '</div></div>';
@@ -73,7 +75,8 @@ function insightList(ctx) {
 export function insightOverview(ctx) {
   const s = model(ctx);
   if (!s.insights.length) return empty(ctx, s.insightsLoaded ? 'emptyInsights' : 'loading');
-  const unread = s.insights.filter(item => !item.is_read), pending = unread.filter(item => item.data?.kind === 'pending_confirmation');
+  const unread = s.insights.filter(item => !item.is_read);
+  const pending = s.insights.filter(item => item.data?.kind === 'pending_confirmation' && !item.confirmed);
   const next = pending[0] || unread[0] || s.insights[0];
   return '<div class="information-overview" role="status"><h2>' + h(unread.length ? text(ctx, 'overviewUnread').replace('{count}', Math.max(unread.length, Number(s.unreadCount) || 0)) : text(ctx, 'overviewAllRead')) + '</h2>' +
     (pending.length ? '<p>' + h(text(ctx, 'overviewPending').replace('{count}', pending.length)) + '</p>' : '') +
@@ -91,13 +94,19 @@ function insightDetail(ctx) {
   const deals = data.dealing_numbers || [], calls = item.source_calls || [];
   // A confirmation without a reply session cannot be answered here; offer the two ways forward instead of a dead end.
   const legacyConfirm = data.needs_confirmation && (!item.reply_state || item.reply_state === 'none');
+  const busy = Boolean(s.busy), needsConfirm = data.kind === 'pending_confirmation';
+  const confirmation = !needsConfirm ? '' : item.confirmed
+    ? '<section class="information-confirm is-confirmed"><p>' + h(text(ctx, 'confirmedState')) + (item.confirmed_at ? ' · ' + time(ctx, item.confirmed_at) : '') +
+      '</p><div class="button-row">' + quiet(ctx, 'unconfirmAction', 'confirm', item.id, busy) + '</div></section>'
+    : '<section class="information-confirm"><p>' + h(text(ctx, legacyConfirm ? (deals.length ? 'confirmWithDeal' : 'confirmInChat') : 'confirmNeeded')) + '</p><div class="button-row">' +
+      '<button class="button primary" type="button" data-information-action="confirm" data-id="' + a(item.id) + '"' + (busy ? ' disabled' : '') + '>' + h(text(ctx, 'confirmAction')) + '</button>' +
+      (legacyConfirm && deals.length ? '<button class="button" type="button" data-information-action="deal" data-id="' + a(deals[0]) + '">' + h(text(ctx, 'openDeal')) + '</button>' : '') +
+      (legacyConfirm ? button(ctx, 'askAgent', 'ask-agent', item.id) : '') + '</div></section>';
   return '<article class="information-article information-insight-detail"><header class="information-detail-header">' +
     '<button class="information-back" type="button" data-information-action="insight-back">' + h(text(ctx, 'backToList')) + '</button>' +
     '<div class="information-article-actions"><div class="information-detail-meta"><span class="information-kind">' + h(text(ctx, data.kind)) + '</span><span>' + h(text(ctx, item.task_id ? 'sourceTask' : 'sourceChat')) +
     '</span></div>' + quiet(ctx, item.is_read ? 'markUnread' : 'markRead', 'read', item.id, Boolean(s.busy)) + '</div><h2>' + h(data.title) + '</h2></header>' +
-    (legacyConfirm ? '<section class="information-confirm"><p>' + h(text(ctx, deals.length ? 'confirmWithDeal' : 'confirmInChat')) + '</p><div class="button-row">' +
-      (deals.length ? '<button class="button primary" type="button" data-information-action="deal" data-id="' + a(deals[0]) + '">' + h(text(ctx, 'openDeal')) + '</button>' : '') +
-      button(ctx, 'askAgent', 'ask-agent', item.id) + '</div></section>' : '') +
+    confirmation +
     facts([[text(ctx, 'period'), period], [text(ctx, 'updated'), time(ctx, item.updated_at)]]) +
     '<div class="information-prose">' + simpleRichText(data.content) + '</div>' +
     (deals.length ? '<section class="information-section"><h3>' + h(text(ctx, 'relatedDeals')) + '</h3><div class="information-links">' + deals.map(id =>

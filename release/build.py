@@ -7,16 +7,25 @@ from email.parser import BytesParser
 import hashlib
 import json
 from pathlib import Path
-from portable import bundle_runtimes
+from portable import add_runtimes, bundle_runtimes
 import re
 import shutil
 import subprocess
+import tarfile
 import zipfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SKIP_PARTS = {'.git', '.venv', 'node_modules', '__pycache__', 'tests', 'artifacts'}
-TEXT = {'.py', '.js', '.mjs', '.css', '.html', '.json', '.md', '.txt', '.toml', '.svg', '.ps1', '.cmd'}
+TEXT = {'.py', '.js', '.mjs', '.css', '.html', '.json', '.md', '.txt', '.toml', '.svg', '.ps1', '.cmd', '.sh', '.command'}
+# Per platform: the launchers in release/<folder>/ that sit at the package root, and what the wheels are built for.
+PLATFORMS = {
+    'win-x64': {'folder': 'windows', 'launchers': ('install_windows.ps1', 'start_windows.cmd', 'stop_windows.cmd'),
+                'target': 'Windows x64 / CPython 3.13', 'scope': 'Windows x64 portable release candidate'},
+    # Not signed or notarized: install_macos.sh sets it up for the user who runs it. For local use only.
+    'macos-arm64': {'folder': 'macos', 'launchers': ('install_macos.sh', 'start_macos.command', 'stop_macos.command'),
+                    'target': 'macOS arm64 / CPython 3.13', 'scope': 'macOS Apple silicon local build (unsigned)'},
+}
 SECRET_PATTERNS = [r'\bsk-[A-Za-z0-9_-]{20,}', r'GOCSPX-[A-Za-z0-9_-]{10,}',
                    r'ya29\.[A-Za-z0-9_.-]+', r'\b\d{10,}-[a-z0-9]+\.apps\.googleusercontent\.com',
                    r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
@@ -47,7 +56,7 @@ def source_commit():
     return None
 
 
-def bundle_wheels(source, root, copy):
+def bundle_wheels(source, root, copy, platform_label='Windows x64 / CPython 3.13'):
     """Keep original wheels, pin every hash, and preserve upstream notices."""
     packages = []
     names = set()
@@ -81,10 +90,10 @@ def bundle_wheels(source, root, copy):
         copy(wheel, root / 'wheelhouse' / wheel.name)
     if not packages:
         raise ValueError('No wheels supplied')
-    lock = '# Windows x64 / CPython 3.13. Install with --no-index --find-links wheelhouse --require-hashes.\n'
+    lock = f'# {platform_label}. Install with --no-index --find-links wheelhouse --require-hashes.\n'
     lock += ''.join(f"{p['name']}=={p['version']} --hash=sha256:{p['sha256']}\n" for p in packages)
     (root / 'requirements-offline.txt').write_text(lock, encoding='utf-8')
-    json_file(root / 'DEPENDENCIES.json', {'target': 'Windows x64 / CPython 3.13', 'packages': packages})
+    json_file(root / 'DEPENDENCIES.json', {'target': platform_label, 'packages': packages})
     return len(packages)
 
 
@@ -179,13 +188,18 @@ def build(args):
         copy(ROOT / name, root / name)
     # The launcher picks the version; platform launchers live in release/<platform>/ and sit at the package root.
     copy(HERE / 'launch.py', root / 'launch.py')
+    # An update package carries the launcher too; run.py puts it in place, since updates only replace versions/<v>/.
+    copy(HERE / 'launch.py', app / 'launch.py')
     json_file(root / 'current.json', {'version': version, 'previous': None, 'trial': False})
-    for name in ('install_windows.ps1', 'start_windows.cmd', 'stop_windows.cmd'):
-        copy(HERE / 'windows' / name, root / name)
+    platform = PLATFORMS[args.platform]
+    for name in platform['launchers']:
+        copy(HERE / platform['folder'] / name, root / name)
+        if args.platform != 'win-x64':   # a checkout with core.autocrlf may hand over CRLF, which bash cannot run
+            (root / name).write_bytes((root / name).read_bytes().replace(b'\r\n', b'\n'))
     # The package opens with the product introduction; the full install and operations guide ships beside it.
     copy(HERE / 'README.package.md', root / 'README.md')
 
-    wheel_count = bundle_wheels(Path(args.wheelhouse).resolve(), root, copy) if args.wheelhouse else 0
+    wheel_count = bundle_wheels(Path(args.wheelhouse).resolve(), root, copy, platform['target']) if args.wheelhouse else 0
     if args.dependency_sources:
         extra = Path(args.dependency_sources).resolve()
         records = json.loads((extra / 'SOURCES.json').read_text(encoding='utf-8'))
@@ -211,7 +225,7 @@ def build(args):
     if getattr(args, 'runtime_downloads', None):
         if not wheel_count:
             raise ValueError('Portable runtime requires the complete offline wheelhouse')
-        runtimes = bundle_runtimes(args.runtime_downloads, root, app)
+        runtimes = bundle_runtimes(args.runtime_downloads, root, app, args.platform)
 
     hits = []
     for file in root.rglob('*'):
@@ -240,7 +254,7 @@ def build(args):
         'created_at': datetime.now(timezone.utc).isoformat(), 'sources': source_status,
         'third_party': {'ddgs': expected}, 'license': 'MIT', 'bundled_wheels': wheel_count,
         'bundled_runtimes': [{k: r[k] for k in ('name', 'version', 'sha256')} for r in runtimes],
-        'scope': 'Windows x64 portable release candidate' if runtimes else 'Local single-user source release candidate',
+        'scope': platform['scope'] if runtimes else 'Local single-user source release candidate',
         'transforms': ['Backend settings generated from code defaults with mail sync, ADR and automation enabled',
                        'Frontend package.json carries the release version'],
         'excluded': ['secrets', 'OAuth app credentials', 'Gmail tokens', 'mail/attachments', 'databases',
@@ -254,11 +268,17 @@ def build(args):
               if p.is_file() and not p.relative_to(root).as_posix().startswith('versions/')
               and p.relative_to(root).as_posix() != 'current.json'}
     json_file(root / 'MANIFEST.json', {'algorithm': 'sha256', 'files': shared})
-    archive = out / ('GUILIU-' + label + '.zip')
-    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
-        for file in sorted(root.rglob('*')):
-            if file.is_file():
-                zipped.write(file, str(file.relative_to(out)))
+    if args.platform == 'win-x64':
+        archive = out / ('GUILIU-' + label + '.zip')
+        with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
+            for file in sorted(root.rglob('*')):
+                if file.is_file():
+                    zipped.write(file, str(file.relative_to(out)))
+    else:
+        archive = out / ('GUILIU-' + label + '.tar.gz')
+        package_tar(archive, root, platform['launchers'], args.runtime_downloads if runtimes else None, runtimes)
+        # Run on the Mac beside the archive; the copy inside the package does the same from an extracted folder.
+        shutil.copyfile(root / 'install_macos.sh', out / 'install_macos.sh')
     # The update package: only this version's folder, for an installed release whose runtime matches.
     update = out / ('GUILIU-' + label + '-app.zip')
     with zipfile.ZipFile(update, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
@@ -272,6 +292,30 @@ def build(args):
     print(json.dumps({'folder': str(root), 'archive': str(archive), 'update_package': str(update),
                       'latest': str(out / 'latest.json') if args.signing_key else None,
                       'files': len(app_files) + len(shared) + 2, 'bytes': archive.stat().st_size, 'sha256': sha(archive)}, indent=2))
+
+
+def package_tar(archive, root, executables, downloads, runtimes):
+    """The full package as a tar, the only format the Mac keeps file modes and links from: launchers executable,
+    everything else as plain files, and the runtimes copied from their upstream archives as they are."""
+    def entry(path, name, mode):
+        info = tarfile.TarInfo(name)
+        info.mode, info.mtime = mode, int(path.stat().st_mtime)
+        if path.is_dir():
+            info.type = tarfile.DIRTYPE
+        else:
+            info.size = path.stat().st_size
+        return info
+
+    with tarfile.open(archive, 'w:gz', compresslevel=9, format=tarfile.PAX_FORMAT) as tar:
+        for path in [root, *sorted(root.rglob('*'))]:
+            name = (Path(root.name) / path.relative_to(root)).as_posix()
+            if path.is_dir():
+                tar.addfile(entry(path, name, 0o755))
+            elif path.is_file():
+                with path.open('rb') as data:
+                    tar.addfile(entry(path, name, 0o755 if path.parent == root and path.name in executables else 0o644), data)
+        if runtimes:
+            add_runtimes(tar, downloads, runtimes, root.name)
 
 
 def runtime_id(root):
@@ -293,7 +337,8 @@ def signed_latest(out, root, version, args, update):
                'notes': notes, 'release_url': args.release_page.format(version=version), 'runtime': runtime_id(root),
                'app': {'url': base + '/' + update.name, 'sha256': sha(update), 'size': update.stat().st_size}}
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
-    path = out / 'latest.json'
+    # backend/updates.py: Windows copies read latest.json; every other platform its own file in the same release.
+    path = out / ('latest.json' if args.platform == 'win-x64' else f'latest-{args.platform}.json')
     json_file(path, {'payload': payload, 'signature': base64.b64encode(key.sign(canonical)).decode()})
     return path
 
@@ -304,12 +349,12 @@ if __name__ == '__main__':
         parser.add_argument('--' + name, default=str(ROOT / name))
     parser.add_argument('--output', required=True)
     parser.add_argument('--version', default='0.1.0-rc.1')
-    parser.add_argument('--platform', default='win-x64')
+    parser.add_argument('--platform', default='win-x64', choices=sorted(PLATFORMS))
     parser.add_argument('--signing-key', help='Ed25519 private key (PEM) that signs latest.json; never in a repository')
     parser.add_argument('--notes', help='Release notes text shown by the in-app update check')
     parser.add_argument('--release-base-url', default='https://github.com/rhinoqvq/GuiLiu/releases/download/v{version}')
     parser.add_argument('--release-page', default='https://github.com/rhinoqvq/GuiLiu/releases/tag/v{version}')
-    parser.add_argument('--wheelhouse', help='Optional CPython 3.13 Windows x64 wheel directory')
+    parser.add_argument('--wheelhouse', help='Optional CPython 3.13 wheel directory for the platform')
     parser.add_argument('--dependency-sources', help='Optional upstream source archives and license notices')
     parser.add_argument('--runtime-downloads', help='Verified official Python/Node archives with RUNTIMES.json')
     build(parser.parse_args())

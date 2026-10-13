@@ -40,20 +40,19 @@ export function runtimeSettingsView(ctx) {
   const groups = ['models', 'loop'];
   return '<section class="runtime-settings" data-runtime-settings data-runtime-source="' + escapeAttr(state.source) + '"' +
     ' data-runtime-loaded="' + Boolean(doc) + '"><header class="runtime-heading"><h2>' + escapeHtml(text('title')) +
-    '</h2><span class="settings-behavior">' + escapeHtml(t(ctx.language, 'settingsAfterRestart')) + '</span><button type="button" class="button" data-runtime-reload>' + escapeHtml(text('reload')) + '</button></header>' +
-    '<p class="runtime-note">' + escapeHtml(text('restart')) + '</p>' +
+    '</h2><span class="settings-behavior">' + escapeHtml(t(ctx.language, 'settingsAfterRestart')) + '</span></header>' +
     '<p class="runtime-status" role="status" aria-live="' + (doc ? 'off' : 'polite') + '">' + escapeHtml(status) + '</p>' +
     '<p class="runtime-error" role="alert"' + (error ? '' : ' hidden') + '>' + escapeHtml(error) + '</p>' +
     (doc ? '<div data-runtime-controls><fieldset class="runtime-fields">' + groups.map(group =>
       '<details class="runtime-group"' + (group === 'models' ? ' open' : '') + '><summary>' + escapeHtml(text(group)) + '</summary>' +
-      (group !== 'models' ? '<p class="runtime-note">' + escapeHtml(text(group + 'Hint')) + '</p>' : '') +
       '<div class="runtime-grid">' + RUNTIME_FIELDS.filter(field => field.path.startsWith(group + '.') &&
         !['models.adr', 'models.legacy_adr', 'loop.adr_ocr_limit'].includes(field.path))
-        .map(field => inputView(field, state, ctx.language)).join('') + '</div></details>').join('') + '</fieldset>' +
-      '<footer class="runtime-actions"><div class="runtime-feedback" role="status" aria-live="polite"><p>' + escapeHtml(status) +
-      '</p><p class="runtime-error" data-runtime-save-error' + (error ? '' : ' hidden') + '>' + escapeHtml(error) +
-      '</p></div><button class="button" type="button" data-runtime-discard>' + escapeHtml(text('discard')) +
-      '</button></footer></div>' : '') + '</section>';
+        .map(field => inputView(field, state, ctx.language)).join('') + '</div></details>').join('') + '</fieldset></div>' : '') +
+    // Reload stays available when loading failed, so the section can be read again.
+    '<footer class="runtime-actions">' + (doc ? '<div class="runtime-feedback" role="status" aria-live="polite"><p>' + escapeHtml(status) +
+      '</p><p class="runtime-error" data-runtime-save-error' + (error ? '' : ' hidden') + '>' + escapeHtml(error) + '</p></div>' : '') +
+    '<button type="button" class="button" data-runtime-reload>' + escapeHtml(text('reload')) + '</button>' +
+    (doc ? '<button class="button" type="button" data-runtime-discard>' + escapeHtml(text('discard')) + '</button>' : '') + '</footer></section>';
 }
 
 export function patchRuntimeSettings(root, ctx) {

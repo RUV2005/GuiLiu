@@ -104,7 +104,7 @@
 .setup-candidate-table :is(th, td):nth-child(-n + 2) { position: sticky; z-index: 1; }
 .setup-candidate-table :is(th, td):nth-child(1) { left: 0; }
 .setup-candidate-table :is(th, td):nth-child(2) { left: 40px; box-shadow: inset -1px 0 0 var(--line); }
-.setup-shell .setup-candidate-table tbody :is(th, td):nth-child(-n + 2) { background: var(--canvas); }
+.setup-shell .setup-candidate-table tbody :is(th, td):nth-child(-n + 2) { background: var(--setup-card, var(--canvas)); }
 .setup-candidate-table thead th:last-child { position: sticky; right: 0; z-index: 1; }
 .setup-candidate-table .setup-account-row-actions, .setup-candidate-table thead th:last-child { box-shadow: inset 1px 0 0 var(--line); }
 .setup-account-table.setup-candidate-table .setup-account-row-actions .setup-button { display: flex; width: 100%; margin: 0 0 6px; }
@@ -133,10 +133,10 @@
 .setup-empty p, .setup-binding { font: 13px/1.8 var(--font-ui); color: var(--ink-soft); overflow-wrap: anywhere; }
 .setup-account-table-form { margin: 0; }
 /* position: relative contains the visually hidden field labels; otherwise they escape the scroll box and widen the page. */
-.setup-account-table-scroll { position: relative; max-width: 100%; overflow-x: auto; scrollbar-width: thin; border-block: 1px solid var(--line); }
+.setup-account-table-scroll { position: relative; max-width: 100%; overflow-x: auto; scrollbar-width: thin; border-radius: 10px; }
 .setup-account-table { width: 100%; min-width: 840px; table-layout: fixed; border-collapse: collapse; font: 13px/1.6 var(--font-ui); }
 .setup-account-table :is(th, td) { padding: 14px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-.setup-account-table thead th { color: var(--muted); font-weight: 500; background: var(--surface-2); }
+.setup-account-table thead th { color: var(--muted); font-weight: 500; background: var(--setup-card-inset, var(--surface-2)); }
 .setup-account-table tbody th { font-weight: 500; }
 /* Row headers read as part of the row, not as the shared table-header fill. */
 .setup-shell .setup-account-table tbody th { background: transparent; }
@@ -164,9 +164,11 @@
 .setup-account-table :is(input, select) { width: 100%; min-width: 0; min-height: 40px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-1); color: var(--ink); padding: 8px; font: inherit; }
 .setup-account-table .setup-account-amount, .setup-account-table .setup-account-amount :is(button, input), .setup-account-table thead th:nth-child(5), .setup-account-table thead th:nth-child(6) { text-align: right; font-variant-numeric: tabular-nums; }
 .setup-account-table thead :is(th:nth-child(5), th:nth-child(6)) { padding-right: 16px; }
-.setup-account-table .setup-account-row-actions { position: sticky; right: 0; background: var(--canvas); text-align: right; }
-.setup-account-table .is-editing .setup-account-row-actions { background: var(--surface-2); }
-.setup-account-table .is-editing { background: var(--surface-2); }
+.setup-account-table .setup-account-row-actions { position: sticky; right: 0; background: var(--setup-card, var(--canvas)); text-align: right; }
+.setup-account-table .is-editing .setup-account-row-actions { background: var(--setup-card-inset, var(--surface-2)); }
+.setup-account-table .is-editing { background: var(--setup-card-inset, var(--surface-2)); }
+/* An empty cell keeps a value's box, so its dash lines up with the values above and below. */
+.setup-cell-blank { display: block; min-height: 40px; padding: 8px; border: 1px solid transparent; color: var(--muted); }
 .setup-account-table .setup-account-row-actions .setup-button { min-height: 34px; padding: 6px 9px; margin: 3px 4px 3px 0; font-size: 12px; white-space: nowrap; }
 .setup-account-row-note td { color: var(--muted); font-size: 12px; }
 .setup-table-note { display: flex; align-items: center; gap: 16px; max-width: 640px; }
@@ -339,3 +341,40 @@
 .setup-mail-warning strong { display: block; color: var(--ink); font: 600 14px/1.6 var(--font-ui); }
 .setup-mail-warning p { margin: 4px 0 0; color: var(--ink-soft); font: 13px/1.75 var(--font-ui); overflow-wrap: anywhere; }
 .setup-form-fields > .setup-mail-warning { max-width: 640px; margin: 0 0 20px; }
+/* Cards instead of rules (as in Settings): each block of a step sits on a soft surface and rows are told apart by
+   spacing. Scoped to the setup shell, since Settings loads this file for its mailbox window. */
+.setup-shell { --setup-card: var(--surface-2); --setup-card-ring: rgb(255 255 255 / 4%); --setup-card-shadow: none; --setup-card-inset: var(--surface-3); }
+:root[data-theme="light"] .setup-shell { --setup-card: #ffffff; --setup-card-ring: rgb(15 23 42 / 7%); --setup-card-shadow: 0 1px 2px rgb(15 23 42 / 4%); --setup-card-inset: var(--surface-2); }
+.setup-shell :is(.setup-card, .setup-api-service, .setup-range, .setup-mailbox-panel, .setup-review-region, .setup-outline, .setup-summary) {
+  border: 0; border-radius: 14px; background: var(--setup-card); box-shadow: 0 0 0 1px var(--setup-card-ring), var(--setup-card-shadow);
+}
+.setup-shell .setup-card { padding: 22px 24px; }
+.setup-shell .setup-api-service { padding: 22px 24px 24px; }
+.setup-shell .setup-api-service + .setup-api-service { margin-top: 16px; }
+.setup-shell .setup-range { max-width: none; }
+.setup-shell .setup-advanced { border-top: 0; padding-top: 6px; }
+.setup-shell .setup-outline { margin: 8px 0 0; padding: 10px 24px 10px 60px; }
+.setup-shell .setup-outline li { padding: 11px 0 11px 10px; border-bottom: 0; }
+.setup-shell .setup-summary { margin: 8px 0 0; padding: 8px 24px; }
+.setup-shell .setup-summary div { padding: 13px 0; border-bottom: 0; }
+.setup-shell .setup-actions { margin-top: 20px; padding-top: 8px; border-top: 0; }
+/* Mailbox step: the two mailboxes are cards to pick from; the open one is outlined. */
+.setup-shell .setup-mailbox-tab { border-color: transparent; background: var(--setup-card); box-shadow: 0 0 0 1px var(--setup-card-ring), var(--setup-card-shadow); }
+.setup-shell .setup-mailbox-tab:hover { border-color: transparent; background: var(--surface-hover); }
+.setup-shell .setup-mailbox-tab[aria-selected="true"] { border-color: var(--line-strong); background: var(--setup-card); }
+.setup-shell .setup-mailbox-method[aria-checked="true"], .setup-shell .setup-mailbox-steps { background: var(--setup-card-inset); }
+/* Callouts lose the side rule's hard edge but keep its colour. */
+.setup-shell :is(.setup-feedback, .setup-local, .setup-mail-warning) { border-left: 0; border-radius: 12px; background: var(--setup-card); }
+.setup-shell .setup-feedback { box-shadow: inset 3px 0 0 var(--danger), 0 0 0 1px var(--setup-card-ring); }
+.setup-shell :is(.setup-local, .setup-mail-warning) { box-shadow: inset 3px 0 0 var(--warning), 0 0 0 1px var(--setup-card-ring); }
+.setup-shell .setup-rule-summary { border-radius: 12px; }
+/* Account review: each region is a card and its table stays inside the card's padding, scrolling there when wide. */
+.setup-shell .setup-review-grid { gap: 16px; }
+.setup-shell .setup-review-region { padding: 20px 24px 22px; }
+.setup-shell .setup-review-region .setup-region-header { margin-bottom: 12px; }
+.setup-shell .setup-review-confirm { margin-top: 16px; padding: 8px 0; border-top: 0; }
+@media (max-width: 560px) {
+  .setup-shell :is(.setup-card, .setup-api-service, .setup-review-region) { padding-inline: 16px; border-radius: 12px; }
+  .setup-shell .setup-summary { padding-inline: 16px; }
+  .setup-shell .setup-outline { padding-right: 16px; padding-left: 50px; }
+}

@@ -1,6 +1,6 @@
 export const MAIL_SOURCES = Object.freeze(['bank_mail', 'ocr_mail']);
 export const MAIL_ACTIVE = ['queued', 'waiting', 'running'];
-export const MAIL_TERMINAL = ['completed', 'completed_with_pending', 'failed', 'interrupted'];
+export const MAIL_TERMINAL = ['completed', 'completed_with_pending', 'failed', 'interrupted', 'cancelled'];
 export const MAIL_COUNTERS = ['total', 'checked', 'completed', 'skipped_done', 'pending', 'failed'];
 
 export function createFullMailImportState(source) {
@@ -42,7 +42,7 @@ export function readFullMailImport(response) {
   };
   return { task_id: value.task_id || null, status: value.status, scope: value.scope === 'inbox' ? 'inbox' : null,
     sources: [...value.sources], stage: value.stage || null,
-    created_at: date('created_at'), finished_at: date('finished_at'), results,
+    created_at: date('created_at'), finished_at: date('finished_at'), results, cancelling: value.cancelling === true,
     error: value.error == null ? '' : String(value.error).slice(0, 1500) };
 }
 

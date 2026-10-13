@@ -218,3 +218,26 @@
   .information-run-list button { grid-template-columns: 78px minmax(0, 1fr); gap: 10px; }
   .information-run-list button > span:last-child { grid-column: 2; }
 }
+
+/* Cards instead of rules (as in Settings): each list entry and the open item sit on a soft surface. */
+.information-workspace { --information-card: var(--surface-2); --information-card-ring: rgb(255 255 255 / 4%); }
+.information-list-entry { border-top: 0; border-radius: 12px; background: var(--information-card); box-shadow: 0 0 0 1px var(--information-card-ring); }
+.information-list-entry + .information-list-entry { margin-top: 8px; }
+.information-list-entry[data-selected="true"] { background: var(--surface-hover); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.information-list-item { padding: 14px 16px; border-radius: 12px; }
+.information-detail { padding: 24px 28px; border-left: 0; border-radius: 14px; background: var(--information-card); box-shadow: 0 0 0 1px var(--information-card-ring); }
+.information-facts { padding-bottom: 0; border-bottom: 0; }
+.information-section { padding-top: 0; border-top: 0; }
+.information-source { padding-top: 0; border-top: 0; }
+.information-source-list li + li { border-top: 0; }
+.information-reply-heading, .information-reply-editor { border-top: 0; padding-top: 0; }
+.information-overview { padding: 4px 0; border: 0; border-radius: 0; }
+.information-detail > [data-information-part="detail"] > .information-empty { border: 0; }
+.information-kind { background: var(--surface-3); }
+.information-confirm { border-left: 0; border-radius: 10px; background: var(--surface-3); box-shadow: inset 3px 0 0 var(--warning); }
+.information-confirm.is-confirmed { box-shadow: inset 3px 0 0 var(--line-strong); }
+.information-confirm.is-confirmed p { color: var(--ink-soft); }
+.information-insight-meta[data-kind="confirmedState"] .information-list-meta { color: var(--muted); }
+@container information (max-width: 760px) {
+  .information-detail { border-top: 0; padding: 20px; }
+}

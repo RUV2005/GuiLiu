@@ -14,7 +14,7 @@ from pathlib import Path
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
-from context_manager import ContextManager
+from context_manager import ContextManager, summarized_turn_records
 from make_prompt import make_prompt
 from tool import open_prompt
 
@@ -153,7 +153,10 @@ def update_user_profile_from_context(dry_run: bool = False):
             raise RuntimeError("Profile extraction is limited to two attempts per turn")
         with _locked(binding.path):
             existing = _load(binding.path)
-            users = [copy.deepcopy(row) for row in binding.manager.context["messages"] if row["role"] == "user"]
+            context = binding.manager.context
+            # A question whose turn was partly summarized waits beside the summary; it is still the user's words.
+            users = sorted((copy.deepcopy(row) for row in context["messages"] + summarized_turn_records(context)
+                            if row["role"] == "user"), key=lambda row: row["sequence"])
             if not users:
                 raise ValueError("No user statements are available for extraction")
             # Assistant text and tool output cannot be cited as user facts. Summary is context only.

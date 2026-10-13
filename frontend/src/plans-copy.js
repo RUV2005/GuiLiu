@@ -92,7 +92,7 @@ const extra = {
     confirmFinish: '将这个目标标记为已完成？它会从目标列表隐藏，已有资金和活动记录保留。',
     managementUnsaved: '当前表单中尚未保存的修改不会保存。继续执行此操作？', managementChanged: '计划已变化，请关闭并重新打开「调整计划」，核对后再操作。',
     targetShare: '占计划目标金额', reviewAllocation: '确认调整', allocationNoTarget: '设置目标金额后可按比例调整。',
-    allocationHintLive: '拖动预览，确认后保存。按本计划账户资金计算，不含未指定账户的资金；已消费金额不再占用账户。',
+    
     allocationIncomplete: '账户分配记录未完整加载，请刷新后重试。', allocationChanged: '计划资金已变化，请取消本次调整，刷新后重新选择比例。',
     increaseProgress: '增加进度', decreaseProgress: '减少进度', syncAssets: '计划同步到资产',
     syncAssetsHint: '勾选后，增加进度会向所选账户登记同额收入；减少进度不扣余额。',
@@ -104,14 +104,14 @@ const extra = {
     keepIncome: '仅保留已入账收入', confirmKeepIncome: '账户收入已入账，但计划进度没有保存。结束本次同步并保留这笔收入？之后如需增加进度，请先核对记录并关闭「计划同步到资产」，不要再次入账。',
     incomeKept: '已保留账户收入，未增加计划进度。补录进度前请核对记录并关闭「计划同步到资产」，避免重复入账。',
     syncPlanChanged: '计划已暂停、删除或账户设置已变化。请核对后重试，或仅保留已入账收入。', assetRefreshFailed: '账户信息刷新失败，请刷新资产页核对；不要重复入账。',
-    copyError: '复制失败，可选中提示词手动复制。', on: '降低进度', off: '保留累计进度', today: '今天', chartEmpty: '暂无进度记录', forecastNote: '按计划投入估算，非收益或完成时间保证。'
+    copyError: '复制失败，可选中提示词手动复制。', on: '降低进度', off: '保留累计进度', today: '今天', chartEmpty: '暂无进度记录', 
   },
   ja: {
     saving: '貯蓄プラン', spending_reduction: '節約プラン', done: '完了', legacyInvestment: '投資プラン（既存）',
     confirmFinish: 'この目標を完了にしますか？一覧から非表示になりますが、資金と活動履歴は保持されます。',
     managementUnsaved: 'このフォームの未保存の変更は保存されません。操作を続けますか？', managementChanged: '計画が変更されました。「計画を調整」を開き直し、確認してから操作してください。',
     targetShare: '目標額に対する割合', reviewAllocation: '変更を確認', allocationNoTarget: '目標額を設定すると割合を調整できます。',
-    allocationHintLive: 'ドラッグで試算し、確認後に保存します。この計画に割り当てた口座資金が対象です。口座未指定の資金と支出済みの金額は含みません。',
+    
     allocationIncomplete: '割当履歴をすべて読み込めません。更新して再試行してください。', allocationChanged: '計画の資金が変更されました。今回の変更をキャンセルし、更新後に割合を選び直してください。',
     increaseProgress: '進捗を増やす', decreaseProgress: '進捗を減らす', syncAssets: '資産にも反映',
     syncAssetsHint: '進捗を増やすと同額の収入を口座に記録します。進捗を減らしても残高は減りません。',
@@ -128,14 +128,14 @@ const extra = {
     planCurrencyUnsupported: '計画 API は JPY と CNY に対応しています。対象口座または基準通貨を変更してください。',
     draftMismatch: '下書きの種類または通貨が選択内容と一致しません。戻って確認してください。',
     accountLinkIncomplete: '計画は保存済みですが、口座の関連付けは未確認です。再試行するか「口座を関連付け」で確認してください。計画を重複作成しないでください。',
-    copyError: 'コピーできませんでした。テキストを選択してコピーしてください。', on: '進捗から差し引く', off: '累計進捗を維持', today: '今日', chartEmpty: '進捗の記録はありません', forecastNote: '積立計画に基づく試算です。収益や達成時期を保証しません。'
+    copyError: 'コピーできませんでした。テキストを選択してコピーしてください。', on: '進捗から差し引く', off: '累計進捗を維持', today: '今日', chartEmpty: '進捗の記録はありません', 
   },
   en: {
     saving: 'Savings plan', spending_reduction: 'Spending reduction', done: 'Done', legacyInvestment: 'Investment plan (existing)',
     confirmFinish: 'Mark this goal as completed? It will be hidden from the goal list. Existing funds and activity records are retained.',
     managementUnsaved: 'Unsaved changes in this form will not be saved. Continue with this action?', managementChanged: 'The plan changed. Close and reopen Adjust plan, then review before continuing.',
     targetShare: 'Share of target amount', reviewAllocation: 'Review adjustment', allocationNoTarget: 'Set a target amount to adjust by percentage.',
-    allocationHintLive: 'Drag to preview, then confirm to save. Uses this plan’s account funds, excluding unassigned and already spent funds.',
+    
     allocationIncomplete: 'Account allocation history is incomplete. Refresh and retry.', allocationChanged: 'Plan funds changed. Cancel this adjustment, refresh, then choose the percentage again.',
     increaseProgress: 'Increase progress', decreaseProgress: 'Decrease progress', syncAssets: 'Sync to assets',
     syncAssetsHint: 'Increasing progress records matching income in the selected account. Decreasing progress never reduces its balance.',
@@ -152,7 +152,7 @@ const extra = {
     planCurrencyUnsupported: 'The plan API supports JPY and CNY only. Choose a supported account or change your primary currency.',
     draftMismatch: 'The draft type or currency differs from your selection. Go back and review before retrying.',
     accountLinkIncomplete: 'The plan is saved, but its account link is unconfirmed. Retry or check Link accounts. Do not create the plan again.',
-    copyError: 'Could not copy. Select and copy the prompt manually.', on: 'Reduces progress', off: 'Keeps cumulative progress', today: 'Today', chartEmpty: 'No progress recorded yet', forecastNote: 'Based on planned contributions. Returns and completion dates are not guaranteed.'
+    copyError: 'Could not copy. Select and copy the prompt manually.', on: 'Reduces progress', off: 'Keeps cumulative progress', today: 'Today', chartEmpty: 'No progress recorded yet', 
   },
 };
 export function planText(language, key) { return live[language]?.[key] || extra[language]?.[key] || copy[language]?.[key] || live.en[key] || extra.en[key] || copy.en[key] || key; }

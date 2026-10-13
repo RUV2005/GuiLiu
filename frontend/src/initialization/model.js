@@ -74,9 +74,10 @@ export function mailQueryError(query, providers = ['gmail']) {
   return '';
 }
 const clean = value => String(value ?? '').trim();
-// Mail date range of the vector step, in months back from today; 0 is all mail and the default (last) stop.
+// Mail date range of the vector step, in months back from today; 0 is all mail (the last stop). One year is the default.
 export const MAIL_RANGES = [3, 6, 12, 24, 36, 0];
 export const ALL_MAIL_RANGE = MAIL_RANGES.length - 1;
+export const DEFAULT_MAIL_RANGE = MAIL_RANGES.indexOf(12);
 export function rangeStart(index, now = new Date()) {
   const months = MAIL_RANGES[index] ?? 0;
   if (!months) return null;
@@ -135,7 +136,7 @@ export function stepPayload(step, fields, sources = [], accounts = [], now = Dat
   if (step === 'vector_db') {
     // A started import keeps its first filter; otherwise a custom search takes the place of the date range.
     const query = typeof fields.locked_query === 'string' ? fields.locked_query
-      : clean(fields.query) || rangeQuery(Number(fields.mail_range ?? ALL_MAIL_RANGE), new Date(now));
+      : clean(fields.query) || rangeQuery(Number(fields.mail_range ?? DEFAULT_MAIL_RANGE), new Date(now));
     if (query.length > 2000) throw new Error('queryLong');
     const invalid = mailQueryError(query, fields.mail_providers);
     if (invalid) throw new Error(invalid);

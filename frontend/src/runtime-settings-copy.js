@@ -1,11 +1,11 @@
 const copy = {
   zh: {
-    title: '运行配置', localTitle: '此浏览器的连接', localHint: '这里只调整前端连接地址，不改变服务监听端口或共享配置。',
-    launcherHint: '地址由启动器决定，浏览器经本机代理连接。要更换端口，请用启动器参数重新启动。',
-    restart: '以下为已保存的配置，不代表进程当前使用的值。重启 Backend、Agent、Loop 后生效，环境变量优先；保存不会自动重启服务。',
+    title: '运行配置', 
+    
+    
     models: '任务模型', loop: '自动记账',
     nullable: '留空表示自动（null）',
-    loopHint: '数量为 0 表示不限量，仅影响日常循环；全量入口的默认数量不变。',
+    
     reload: '重新读取', discard: '放弃修改', save: '保存运行配置', loading: '正在读取配置…', saving: '正在保存…',
     saved: '已保存。重启相关服务后生效，当前进程尚未应用这次修改。', dirty: '有未保存的修改',
     confirmDiscard: '放弃尚未保存的运行配置修改，并重新读取服务器配置？',
@@ -20,12 +20,12 @@ const copy = {
     validation: '请检查标记的字段。', unchanged: '没有需要保存的修改。',
   },
   ja: {
-    title: '実行設定', localTitle: 'このブラウザーの接続先', localHint: 'フロントエンドの接続先のみ変更します。待受ポートや共有設定は変更しません。',
-    launcherHint: '接続先はランチャーが決め、ブラウザーはローカルプロキシ経由で接続します。ポートを変えるにはランチャーの引数で再起動してください。',
-    restart: '保存済みの設定です。実行中の値とは限りません。Backend・Agent・Loop の再起動後に適用され、環境変数が優先されます。保存しても自動再起動しません。',
+    title: '実行設定', 
+    
+    
     models: 'タスクのモデル', loop: '自動記帳',
     nullable: '空欄で自動（null）',
-    loopHint: '件数の 0 は無制限です。通常ループのみが対象で、一括処理の既定件数は変わりません。',
+    
     reload: '再読み込み', discard: '変更を破棄', save: '実行設定を保存', loading: '設定を読み込み中…', saving: '保存中…',
     saved: '保存しました。関連サービスの再起動後に適用されます。実行中のプロセスにはまだ適用されていません。', dirty: '未保存の変更があります',
     confirmDiscard: '未保存の実行設定を破棄し、サーバーから再読み込みしますか？',
@@ -40,12 +40,12 @@ const copy = {
     validation: '表示された項目を確認してください。', unchanged: '保存する変更はありません。',
   },
   en: {
-    title: 'Runtime settings', localTitle: 'Browser connections', localHint: 'Changes only where this frontend connects, not server listening ports or shared configuration.',
-    launcherHint: 'The launcher sets these addresses; the browser connects through the local proxy. To change ports, restart with launcher options.',
-    restart: 'These are saved settings, not necessarily the values currently in use. Restart Backend, Agent and Loop to apply them. Environment variables take precedence. Saving does not restart services.',
+    title: 'Runtime settings', 
+    
+    
     models: 'Task models', loop: 'Automatic bookkeeping',
     nullable: 'Leave empty for automatic (null)',
-    loopHint: 'A count of 0 means unlimited. These limits apply to daily loops, not the bulk-processing defaults.',
+    
     reload: 'Reload', discard: 'Discard changes', save: 'Save runtime settings', loading: 'Loading settings…', saving: 'Saving…',
     saved: 'Saved. Restart the relevant services to apply. Running processes have not applied this change.', dirty: 'Unsaved changes',
     confirmDiscard: 'Discard unsaved runtime changes and reload the saved server configuration?',

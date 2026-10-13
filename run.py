@@ -65,6 +65,8 @@ def environment(args):
         shutil.copyfile(ROOT / 'backend/config/settings.json', settings)
     env.update({
         'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONDONTWRITEBYTECODE': '1',
+        # The Mac runtime is a regular interpreter (no ._pth): keep the user's own site-packages out of it.
+        'PYTHONNOUSERSITE': '1',
         'ABK_SETTINGS_FILE': str(settings), 'ABK_SERVER_DATA_DIR': str(data),
         'GUILIU_AUTH_FILE': str(data / 'security/service-credentials.json'),
         'ABK_DB_FILE': str(data / 'backend.sqlite3'),
@@ -258,11 +260,39 @@ def choose_ports(requested):
     return chosen
 
 
+def install_launcher():
+    """Online updates replace only versions/<version>/, so each version carries launch.py and puts it beside
+    versions/: a fix to the launcher then reaches copies installed earlier. The running launcher keeps the code it
+    started with; the root MANIFEST.json follows the new file so verification still passes."""
+    source, target = ROOT / 'launch.py', HOME / 'launch.py'
+    if ROOT.parent.name != 'versions' or ROOT.parent.parent != HOME or not source.is_file() or not target.is_file():
+        return False
+    data = source.read_bytes()
+    if target.read_bytes() == data:
+        return False
+    compile(data, str(target), 'exec')   # never put a launcher in place that does not even parse
+    temp = target.with_name('launch.py.new')
+    temp.write_bytes(data)
+    os.replace(temp, target)
+    manifest_path = HOME / 'MANIFEST.json'
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if 'launch.py' in manifest.get('files', {}):
+            manifest['files']['launch.py'] = hashlib.sha256(data).hexdigest()
+            write_json(manifest_path, manifest)
+    return True
+
+
 def serve(args):
     requested = {name: getattr(args, name + '_port') for name in ('frontend', 'backend', 'agent')}
     explicit = [port for port in requested.values() if port is not None]
     if len(set(explicit)) != len(explicit):
         raise ValueError('Choose three distinct ports')
+    try:
+        if install_launcher():
+            print('Launcher updated for the next start.', flush=True)
+    except (OSError, ValueError, SyntaxError) as error:
+        print(f'Launcher not updated ({type(error).__name__}); the current one keeps working.', flush=True)
     running = running_instance()
     if running:
         url = f"http://127.0.0.1:{running['frontend']}"
@@ -385,7 +415,7 @@ def stop_requested(path, token):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['serve', 'verify', 'stop'])
-    bundled_node = HOME / 'runtime/node/node.exe'
+    bundled_node = HOME / ('runtime/node/node.exe' if os.name == 'nt' else 'runtime/node/bin/node')
     parser.add_argument('--node', default=str(bundled_node) if bundled_node.is_file() else 'node')
     # Leave these out to pick free ports automatically (defaults 3000 / 8001 / 8000 when available).
     parser.add_argument('--frontend-port', type=int)

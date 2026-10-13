@@ -1,5 +1,5 @@
 import { copy } from './copy.js';
-import { UI_STEPS, busyStatus, completed, canVisit, canSubmit, stepPayload, stepProgress, savedKeys, ALL_MAIL_RANGE } from './model.js';
+import { UI_STEPS, busyStatus, completed, canVisit, canSubmit, stepPayload, stepProgress, savedKeys, DEFAULT_MAIL_RANGE } from './model.js';
 import { describeSetupError, serviceProblem, joinSentences } from './setup-errors.js';
 import { e, button, field } from './fields.js';
 import { mountBankReview } from './bank-review-view.js';
@@ -16,7 +16,7 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
   let current = controller.state, key = '', bankView;
   let disposed = false, gmailWindow, mailConnecting = '', mailPanel = '', gmailMethod = '';
   // query holds only the custom search text; the date range is kept separately.
-  let mailRange = ALL_MAIL_RANGE;
+  let mailRange = DEFAULT_MAIL_RANGE;
   const bankDraft = {};
   const t = name => copy(language, name);
   let motion;
@@ -40,7 +40,7 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
   }
   function content(step) {
     if (!current.status) return `<form data-setup-connect>${field(t('backend'), 'backendPath', backendPath, 'type="url" required autocomplete="url"')}<footer class="setup-actions"><button class="setup-button primary" type="submit">${e(t('connect'))}</button></footer></form>`;
-    if (step === 'welcome') return `<p class="setup-lead">${e(t('welcomeNote'))}</p><ol class="setup-outline">${UI_STEPS.slice(0, -1).map(s => `<li>${e(t(s))}</li>`).join('')}</ol><footer class="setup-actions">${button(t('start'), 'next', 'primary')}</footer>`;
+    if (step === 'welcome') return `<p class="setup-lead">${e(t('welcomeNote'))}</p><ol class="setup-outline">${UI_STEPS.map(s => `<li>${e(t(s))}</li>`).join('')}</ol><footer class="setup-actions">${button(t('start'), 'next', 'primary')}</footer>`;
     if (step === 'account_confirmation') return '<div data-setup-bank-review></div>';
     let body = '';
     if (step === 'api_keys') body = `<p class="setup-lead">${e(t('apiIntro'))}</p>
@@ -67,7 +67,7 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
       if (!gmailMethod) gmailMethod = defaultGmailMethod(current.status);
       body = mailboxMarkup(t, current.status, mailPanel, gmailMethod);
     }
-    if (step === 'ocr_source') body = `<p class="setup-lead">${e(t('ocrSourceNote'))}</p>${field(t('receiptSenderEmail'), 'email', current.ocrDraft, 'type="email" maxlength="254" autocomplete="email" spellcheck="false" required')}`;
+    if (step === 'ocr_source') body = `<p class="setup-lead">${e(t('ocrSourceNote'))}</p><div class="setup-card">${field(t('receiptSenderEmail'), 'email', current.ocrDraft, 'type="email" maxlength="254" autocomplete="email" spellcheck="false" required')}</div>`;
     if (step === 'vector_db') {
       // The same filter goes to every connected mailbox, so the custom-search hint describes the syntax they all accept.
       const providers = current.status.mail?.providers || ['gmail'], locked = lockedMailQuery(current.status);
@@ -76,9 +76,9 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
       const warning = limited ? `<div class="setup-mail-warning" role="status"><strong>${e(t('neteaseRecentTitle'))}</strong><p>${e(t('neteaseRecentVector').replace('{date}', limited.oldest_mail || ''))}</p></div>` : '';
       body = `<p class="setup-lead">${e(t('vectorNote'))}</p>${warning}${mailRangeMarkup(t, language, { providers, locked, range: mailRange, custom: query.trim() })}`;
     }
-    if (step === 'bank_rules') body = `<p class="setup-lead">${e(t('bankNote'))}</p><p class="setup-note">${e(t('bankNextNote'))}</p>`;
+    if (step === 'bank_rules') body = `<p class="setup-lead">${e(t('bankNote'))}</p>`;
     if (step === 'complete') body = `<p class="setup-lead">${e(t('finishNote'))}</p><dl class="setup-summary">${UI_STEPS.slice(0, -1).map(s => `<div><dt>${e(t(s))}</dt><dd>${e(s === 'bank_rules' && !current.status.sources.length ? t('emptyBankConfirmed') : s === 'account_confirmation' ? t(current.reviewed ? 'reviewDone' : 'waiting') : t(completed(current.status, s) ? 'saved' : 'waiting'))}</dd></div>`).join('')}</dl><div data-setup-missing></div>`;
-    return `<form data-setup-form autocomplete="off"><fieldset class="setup-form-fields">${body}</fieldset><footer class="setup-actions"><button class="setup-button primary" type="submit" data-setup-submit></button>${button(t('next'), 'next', 'primary')}${button(t('retry'), 'refresh')}</footer></form>`;
+    return `<form data-setup-form autocomplete="off"><fieldset class="setup-form-fields">${body}</fieldset><footer class="setup-actions"><button class="setup-button primary" type="submit" data-setup-submit></button>${button(t('next'), 'next', 'primary')}</footer></form>`;
   }
   function sync(state) {
     if (disposed) return;
@@ -170,7 +170,6 @@ export function mountInitializationView({ root, controller, language = 'zh', bac
     }
     for (const retry of root.querySelectorAll('[data-setup-action="refresh"]')) {
       retry.disabled = current.checking || current.posting || current.finishing; retry.textContent = t('retry');
-      if (retry.closest('[data-setup-form]')) retry.hidden = step === 'gmail';
     }
     for (const lang of root.querySelectorAll('[data-setup-language]')) { lang.disabled = current.posting || current.accountPosting; lang.setAttribute('aria-pressed', String(lang.dataset.setupLanguage === language)); }
     const connect = root.querySelector('[data-setup-connect]');

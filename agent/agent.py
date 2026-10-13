@@ -31,14 +31,15 @@ from tool import (
     web_fetch,
 )
 from AgentLog import AgentLog
-from context_manager import open_context
+from context_manager import open_context, summarized_turn_records, task_snapshot_dir, turn_records
 from context_compaction import prepare_context_prompt
 from chat_history import ChatHistoryStore, public_user_message, visible_message
-from make_prompt import ContextBudgetExceeded, RuntimeLimits, render_system_prompt
+from make_prompt import ContextBudgetExceeded, RuntimeLimits, estimate_input_tokens, render_system_prompt
 from model_config import get_model_config, resolve_chat_model, resolve_task_model
 from model_errors import ModelAPIError
 from runtime_settings import get_setting, localized_task
 from user_profile import profile_context, get_user_profile, update_user_profile_from_context
+from user_address import address_guidance
 from plans import get_financial_plans, get_financial_plan, PLAN_GUIDANCE
 from data_retrieval import build_data_package, read_package_evidence, DATA_RETRIEVAL_GUIDANCE
 from visualization_context import VisualizationTurn, visualization_context
@@ -203,20 +204,17 @@ class ReActAgent:
                 "务必为 </final_answer> 留出空间，输出结束标签后停止。"
             )
             context = context_manager.context
-            records = sorted(
-                (row for row in context["messages"] + context["tool_results"]
-                 if row["turn_id"] == context["turn_id"]), key=lambda row: row["sequence"],
-            )
+            # Summarized steps of this turn travel as their summary; the question stays word for word.
+            through = context["summary"]["through_sequence"]
+            records = [row for row in turn_records(context) if row["sequence"] > through or row.get("role") == "user"]
+            material = {"reason": reason, "requirements": skill_prompt, "records": records}
+            if summarized_turn_records(context):
+                material["earlier_steps_summary"] = context["summary"]["content"]
             messages = [
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": json.dumps({
-                    "reason": reason, "requirements": skill_prompt, "records": records,
-                }, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(material, ensure_ascii=False)},
             ]
-            estimated = self.token_counter(messages) if self.token_counter else (
-                16 + sum(12 + len(row["role"].encode("utf-8")) + len(row["content"].encode("utf-8"))
-                         for row in messages)
-            )
+            estimated = (self.token_counter or estimate_input_tokens)(messages)
             if estimated > self.limits.input_token_budget:
                 raise ContextBudgetExceeded("Repair input exceeds the context budget")
             package = {"messages": messages, "max_output_tokens": self.limits.max_output_tokens,
@@ -358,7 +356,7 @@ class ReActAgent:
 @localized_task
 def run_agent_task(agent, user_input: str, AFName: str = None, U_or_A: bool = True,
                    *, session_id=None, context_dir=None, system_prompt=None, skill_prompt="", visualization=None,
-                   history_message=None, resume_context=None, reply_to=None) -> str:
+                   history_message=None, resume_context=None, reply_to=None, snapshot_dir=None) -> str:
     """Own task lifecycle; run_react only advances an already-created context."""
     is_dialogue = U_or_A is True
     if visualization is not None and not is_dialogue:
@@ -374,13 +372,15 @@ def run_agent_task(agent, user_input: str, AFName: str = None, U_or_A: bool = Tr
     def finish_log(output, results):
         names = []
         if manager is not None and started:
-            names = [row["tool_call"]["name"] for row in manager.context["messages"]
-                     if row["turn_id"] == manager.context["turn_id"] and "tool_call" in row]
+            names = [row["tool_call"]["name"] for row in turn_records(manager.context) if "tool_call" in row]
         finish = LD.finish_user_conversation if is_dialogue else LD.finish_agent_log
         finish(log, llm_output=output, used_tool=LD.collect_tool_names(names, "[]"), results=results)
 
+    if snapshot_dir is None and not is_dialogue:
+        snapshot_dir = task_snapshot_dir(AFName, context_dir)
     try:
-        with open_context(session_id=session_id, directory=context_dir, persistent=is_dialogue) as manager:
+        with open_context(session_id=session_id, directory=context_dir, persistent=is_dialogue,
+                          snapshot_dir=snapshot_dir) as manager:
             if is_dialogue:
                 history = ChatHistoryStore(context_dir=manager.path.parent)
                 history.ensure_active(manager.path.stem.removeprefix("session_"))
@@ -595,7 +595,7 @@ def qwenMax(project_directory:str, prompt: str, *, session_id=None, context_dir=
                                   session_id=session_id, context_dir=context_dir,
                                   visualization=visualization, history_message=user_message,
                                   resume_context=resume_context, reply_to=reply_to,
-                                  skill_prompt="\n\n".join(filter(None, [DATA_RETRIEVAL_GUIDANCE,
+                                  skill_prompt="\n\n".join(filter(None, [address_guidance(), DATA_RETRIEVAL_GUIDANCE,
                                       chart_skill, INSIGHT_GUIDANCE, PLAN_GUIDANCE,
                                       AUTOMATION_TOOL_GUIDANCE, skill_prompt])))
 

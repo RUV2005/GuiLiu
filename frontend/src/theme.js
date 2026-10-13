@@ -2,9 +2,9 @@ import { STORAGE } from './config.js';
 import { escapeAttr, escapeHtml } from './utils.js';
 
 const copy = {
-  zh: { appearance: '外观模式', light: '日间模式', dark: '夜间模式', lightAction: '切换到日间模式', darkAction: '切换到夜间模式', switchHint: '开启为夜间，关闭为日间' },
-  ja: { appearance: '表示モード', light: 'ライトモード', dark: 'ダークモード', lightAction: 'ライトモードに切り替え', darkAction: 'ダークモードに切り替え', switchHint: 'オンでダーク、オフでライト' },
-  en: { appearance: 'Appearance', light: 'Light mode', dark: 'Dark mode', lightAction: 'Switch to light mode', darkAction: 'Switch to dark mode', switchHint: 'On for dark, off for light' },
+  zh: { appearance: '外观模式', light: '日间模式', dark: '夜间模式', lightAction: '切换到日间模式', darkAction: '切换到夜间模式', },
+  ja: { appearance: '表示モード', light: 'ライトモード', dark: 'ダークモード', lightAction: 'ライトモードに切り替え', darkAction: 'ダークモードに切り替え', },
+  en: { appearance: 'Appearance', light: 'Light mode', dark: 'Dark mode', lightAction: 'Switch to light mode', darkAction: 'Switch to dark mode', },
 };
 
 export const normalizeTheme = value => value === 'light' ? 'light' : 'dark';
@@ -26,8 +26,7 @@ export function themeSelect(language, theme) {
 // Two states with one fixed label: an on/off switch reads faster than a dropdown (on = dark).
 export function themeSwitch(language, theme) {
   const labels = copy[language] || copy.en;
-  return '<label class="setting-switch"><span><strong>' + escapeHtml(labels.dark) + '</strong><small>' + escapeHtml(labels.switchHint) +
-    '</small></span><input type="checkbox" name="theme" value="dark" data-theme-select' + (normalizeTheme(theme) === 'dark' ? ' checked' : '') +
+  return '<label class="setting-switch"><span><strong>' + escapeHtml(labels.dark) + '</strong></span><input type="checkbox" name="theme" value="dark" data-theme-select' + (normalizeTheme(theme) === 'dark' ? ' checked' : '') +
     ' /><i class="switch-track" aria-hidden="true"><b></b></i></label>';
 }
 export function themeButton(language, theme, placement = 'label') {

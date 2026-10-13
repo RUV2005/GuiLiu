@@ -28,10 +28,6 @@ export function assetHistoryPoint(row, date = row?.date) {
     scope: Array.isArray(row?.included_accounts) ? [...new Set(row.included_accounts.map(String))].sort().join(',') : null };
 }
 
-export function assetHistoryScopeChanged(points) {
-  return new Set(points.map(point => point.scope).filter(scope => scope !== null && scope !== undefined)).size > 1;
-}
-
 export function assetHistoryChange(points) {
   const first = points[0]?.value, last = points.at(-1)?.value;
   // This is the net-worth snapshot difference, including any disclosed account-scope changes.

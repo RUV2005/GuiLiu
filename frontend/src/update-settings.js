@@ -7,6 +7,7 @@ import { escapeHtml as e, escapeAttr as a } from './utils.js';
 const copy = {
   title: ['版本与更新', 'バージョンと更新', 'Version and updates'],
   current: ['当前版本', '現在のバージョン', 'Current version'],
+  sourceRun: ['源码运行', 'ソースから実行', 'Running from source'],
   latest: ['最新版本', '最新バージョン', 'Latest version'],
   check: ['检查更新', '更新を確認', 'Check for updates'],
   checking: ['正在检查更新…', '更新を確認中…', 'Checking for updates…'],
@@ -66,8 +67,11 @@ export const updateText = (language, key) => copy[key]?.[{ zh: 0, ja: 1, en: 2 }
 const fill = (text, values) => Object.entries(values).reduce((value, [key, item]) => value.replaceAll('{' + key + '}', item), text);
 const megabytes = bytes => (Math.max(0, Number(bytes) || 0) / 1048576).toFixed(1);
 
+// While an update downloads, verifies and restarts, losing the services means they are restarting, not a failure.
+const UPDATING = new Set(['downloading', 'verifying', 'ready', 'restarting']);
+
 export function createUpdateState(source) {
-  return { source, status: null, loading: false, error: '', confirming: false, busy: false, restarting: false, slow: false };
+  return { source, status: null, loading: false, error: '', confirming: false, busy: false, restarting: false, slow: false, updating: false };
 }
 
 export function updateSettingsView(ctx) {
@@ -75,7 +79,7 @@ export function updateSettingsView(ctx) {
   const s = state.status, task = s?.task || {}, version = s?.latest || '';
   const line = (label, value) => '<div><dt>' + e(label) + '</dt><dd>' + e(value) + '</dd></div>';
   let body = '';
-  if (s && !s.supported) body = '<p class="mailbox-settings-note">' + e(text('unsupported')) + '</p>';
+  if (s && !s.supported) body = '';
   else if (s) {
     const working = ['downloading', 'verifying', 'restarting'].includes(task.state) || state.restarting;
     if (s.failed?.version) body += '<p class="mailbox-settings-feedback" role="status">' + e(fill(text('rolledBack'), { version: s.failed.version })) + '</p>';
@@ -110,7 +114,7 @@ export function updateSettingsView(ctx) {
   } else body = '<p class="mailbox-settings-feedback" role="status">' + e(text(state.error || 'checking')) + '</p>';
   return '<section class="settings-group update-settings" data-update-settings aria-labelledby="settings-updates">' +
     '<header><h2 id="settings-updates">' + e(text('title')) + '</h2></header>' +
-    '<dl class="mailbox-settings-summary update-summary">' + line(text('current'), s?.current || '—') +
+    '<dl class="mailbox-settings-summary update-summary">' + line(text('current'), s?.current || (s && !s.supported ? text('sourceRun') : '—')) +
     (s?.supported && s.latest ? line(text('latest'), s.latest) : '') + '</dl>' +
     '<div aria-busy="' + Boolean(state.loading || state.busy) + '">' + body + '</div></section>';
 }
@@ -170,7 +174,7 @@ function patchUpdateSettings(root, ctx) {
 
 export function createUpdateController({ state, api, source, context, root = () => document, reload = () => location.reload(),
   openSettings = () => { location.hash = '#settings'; }, setTimer = setTimeout, clearTimer = clearTimeout, pollMs = 2000,
-  restartLimitMs = 180000, checkMs = 3600000 }) {
+  restartLimitMs = 180000, checkMs = 3600000, clock = Date.now }) {
   const scopes = new Map(), mounted = new WeakSet();
   let epoch = 0, entered = false, timer = null, watching = false;
 
@@ -197,11 +201,15 @@ export function createUpdateController({ state, api, source, context, root = () 
       const payload = await api.getUpdateStatus(refresh, current.source);
       if (version !== epoch) return;
       current.status = payload?.result || null;
-      // Keep reporting a download or verification until it ends.
+      // Keep reporting a download or verification until it ends; a failed one is no longer under way.
       if (['downloading', 'verifying'].includes(current.status?.task?.state)) schedule(() => load(false));
+      if (current.status?.task?.state === 'failed') current.updating = false;
       if (current.status?.task?.state === 'restarting') waitForRestart(current, current.status.current);
     } catch (error) {
-      if (version === epoch) current.error = error?.payload?.error || 'network';
+      if (version !== epoch) return;
+      // The Backend stops for the switch as soon as the update is ready, often before a poll sees "restarting".
+      if (current.updating || UPDATING.has(current.status?.task?.state)) waitForRestart(current, current.status?.current);
+      else current.error = error?.payload?.error || 'network';
     } finally {
       if (version === epoch) {
         current.loading = false; patch();
@@ -213,16 +221,20 @@ export function createUpdateController({ state, api, source, context, root = () 
   function waitForRestart(current, from) {
     if (current.restarting) return;
     current.restarting = true; current.slow = false; patch();
-    const started = Date.now();
+    const started = clock();
     const poll = async () => {
       try {
         const payload = await api.getUpdateStatus(false, current.source);
-        const now = payload?.result?.current;
+        const result = payload?.result, now = result?.current;
         if (now && now !== from) { reload(); return; }
         // Still the old version: a rollback also lands here once the old version is back.
-        if (now && payload.result.failed?.version && Date.now() - started > 5000) { reload(); return; }
+        if (now && result.failed?.version && clock() - started > 5000) { reload(); return; }
+        // The old version answers with nothing under way: the update stopped before the switch; say so.
+        if (now && clock() - started > 15000 && !result.pending && !UPDATING.has(result.task?.state)) {
+          current.restarting = current.updating = false; current.status = result; patch(); return;
+        }
       } catch { /* The services are restarting. */ }
-      if (Date.now() - started > restartLimitMs && !current.slow) { current.slow = true; patch(); }
+      if (clock() - started > restartLimitMs && !current.slow) { current.slow = true; patch(); }
       schedule(poll, pollMs);
     };
     schedule(poll, pollMs * 2);
@@ -235,7 +247,7 @@ export function createUpdateController({ state, api, source, context, root = () 
       const payload = await api.startUpdate(current.status.latest, current.source);
       if (version !== epoch) return;
       current.status = payload?.result || current.status;
-      current.confirming = false;
+      current.confirming = false; current.updating = true;
       schedule(() => load(false));
     } catch (error) {
       if (version === epoch) current.error = error?.payload?.error || 'failed';
@@ -245,12 +257,12 @@ export function createUpdateController({ state, api, source, context, root = () 
   }
   async function restart() {
     const current = activate(), version = epoch, from = current.status?.current;
-    current.busy = true; patch();
+    current.busy = true; current.updating = true; patch();
     try {
       await api.restartForUpdate(current.source);
       if (version === epoch) waitForRestart(current, from);
     } catch (error) {
-      if (version === epoch) current.error = error?.payload?.error || 'failed';
+      if (version === epoch) { current.updating = false; current.error = error?.payload?.error || 'failed'; }
     } finally {
       if (version === epoch) { current.busy = false; patch(); }
     }

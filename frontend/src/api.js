@@ -84,15 +84,16 @@ export class ApiClient {
     return this.request(this.backendBase() + "/DB/dealing-data");
   }
 
+  updateUserProfile(change, { signal } = {}) {
+    return this.request(this.backendBase() + '/user/profile', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(change), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000) });
+  }
+
   getUserProfile({ signal } = {}) {
     return this.request(this.backendBase() + '/user/profile', { cache: 'no-store',
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
   }
 
-  authorizeUserProfile({ signal } = {}) {
-    return this.request(this.backendBase() + '/user/profile/authorize', { method: 'POST',
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
-  }
 
   getFullMailImport(backendPath = this.settings().backendPath, { signal } = {}) {
     const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
@@ -105,6 +106,14 @@ export class ApiClient {
     const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
     const deadline = AbortSignal.timeout(15000);
     return client.request(client.backendBase() + '/mail-imports/full', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}',
+      signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+  }
+
+  cancelFullMailImport(backendPath = this.settings().backendPath, { signal } = {}) {
+    const client = new ApiClient(() => ({ ...this.settings(), backendPath }));
+    const deadline = AbortSignal.timeout(15000);
+    return client.request(client.backendBase() + '/mail-imports/full/cancel', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: '{}',
       signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
   }
@@ -392,6 +401,10 @@ export class ApiClient {
   setAgentInsightRead(id, isRead, options) {
     return this.agentInformationRequest('/insights/' + encodeURIComponent(id), { ...options, method: 'PATCH',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_read: isRead }) });
+  }
+  setAgentInsightConfirmed(id, confirmed, options) {
+    return this.agentInformationRequest('/insights/' + encodeURIComponent(id), { ...options, method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed }) });
   }
   replyAgentInsight(id, message, key, options) {
     return this.agentInformationRequest('/insights/' + encodeURIComponent(id) + '/reply', { timeout: 1800000, ...options, method: 'POST',

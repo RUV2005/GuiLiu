@@ -12,21 +12,15 @@ const PROVIDERS = ['gmail', '163'];
 const RUNNING = ['indexing', 'discovering', 'rules'];
 const copy = {
   title: ['邮箱', 'メール', 'Mailboxes'],
-  independent: ['独立操作，无需保存设置', '設定の保存とは独立', 'Independent of Save settings'],
   gmail: ['Gmail', 'Gmail', 'Gmail'],
   163: ['网易 163 邮箱', 'NetEase 163 メール', 'NetEase 163 Mail'],
   connected: ['已连接', '接続済み', 'Connected'],
-  expired: ['授权已失效', '認証が無効です', 'Authorization lost'],
+  expired: ['连接失效', '接続が無効です', 'Connection lost'],
   absent: ['未连接', '未接続', 'Not connected'],
   adding: ['正在添加', '追加中', 'Being added'],
-  imap: ['应用专用密码', 'アプリ パスワード', 'App password'],
-  oauth: ['Google 授权', 'Google 認証', 'Google authorization'],
-  code: ['客户端授权码', 'クライアント認証コード', 'Client authorization code'],
   add: ['添加', '追加', 'Add'],
   reconnect: ['重新连接', '再接続', 'Reconnect'],
   loading: ['正在读取邮箱状态…', 'メールの状態を取得中…', 'Loading mailboxes…'],
-  note: ['添加的邮箱会在后台建立索引并识别银行，完成后会通知你回到这里确认；期间可以照常使用归流。', '追加したメールはバックグラウンドで索引作成と銀行の識別を行い、完了したらお知らせします。その間も通常どおり利用できます。',
-    'An added mailbox is indexed and searched for banks in the background; you get a message to confirm them here, and can keep using GUILIU meanwhile.'],
   dialogAdd: ['添加 {mailbox}', '{mailbox} を追加', 'Add {mailbox}'],
   dialogReconnect: ['重新连接 {mailbox}', '{mailbox} を再接続', 'Reconnect {mailbox}'],
   reconnectNote: ['请使用原来绑定的账号。重新连接只更新授权，不会重新导入数据。', '元のアカウントを使用してください。再接続は認証だけを更新し、データは取り込み直しません。',
@@ -80,10 +74,19 @@ const copy = {
   needName: ['请填写账户名称。', '口座名を入力してください。', 'Enter an account name.'],
   failed: ['操作失败，请稍后重试。', '操作に失敗しました。しばらくしてから再試行してください。', 'The action failed. Please retry.'],
   localOnly: ['此操作仅支持在运行归流的电脑上打开的页面。', 'この操作は GUILIU を実行しているパソコン上のページでのみ利用できます。', 'This works only on the computer running GUILIU.'],
+  revokedToast: ['Gmail 连接已失效，新邮件暂停读取。请到 设置 → 邮箱 重新连接。', 'Gmail の接続が無効になり、新しいメールの読み込みを停止しています。設定 → メール で再接続してください。',
+    'The Gmail connection was lost and new mail is not being read. Reconnect it in Settings → Mailboxes.'],
+  entryRevoked: ['Gmail 连接失效', 'Gmail の接続が無効', 'Gmail connection lost'],
 };
 const index = language => ({ zh: 0, ja: 1, en: 2 }[language] ?? 0);
 export const mailboxText = (language, key, values = {}) =>
   Object.entries(values).reduce((text, [k, v]) => text.replaceAll('{' + k + '}', v), copy[key]?.[index(language)] ?? key);
+
+// When Google revoked the saved Gmail authorization (the Backend reports the time), else null.
+export function gmailRevokedAt(overview) {
+  const gmail = overview?.mail?.accounts?.find(item => item.provider === 'gmail');
+  return gmail?.selected && gmail.revoked_at ? gmail.revoked_at : null;
+}
 
 export function createMailboxSettingsState(source) {
   return { source, overview: null, loading: false, error: '', notice: '', busy: false, dialog: null, choices: {}, formError: '' };
@@ -146,21 +149,19 @@ export function mailboxSettingsView(ctx) {
   const adding = job && job.state !== 'done';
   const rows = PROVIDERS.map(provider => {
     const account = overview?.mail?.accounts?.find(item => item.provider === provider), row = rowState(account, job, provider);
-    const method = provider === '163' ? 'code' : account?.method === 'imap' ? 'imap' : 'oauth';
-    const email = provider === 'gmail' ? overview?.gmail_email || account?.email : account?.email;
     const mode = row === 'absent' ? 'add' : 'reconnect';
     const disabled = !overview || state.busy || row === 'adding' || (mode === 'add' && (adding || overview.indexing));
+    const revoked = provider === 'gmail' && row === 'expired' && gmailRevokedAt(overview);
     return '<div><dt>' + e(text(provider)) + '</dt><dd><span class="mailbox-settings-status" data-state="' + row + '">' + e(text(row)) + '</span>' +
-      (row !== 'absent' && email ? '<small>' + e([email, text(method)].join(' · ')) + '</small>' : '') + '</dd>' +
-      '<dd><button class="button" type="button" data-mailbox-action="' + mode + '" data-mailbox-provider="' + a(provider) + '"' +
+      '</dd>' +
+      '<dd><button class="button' + (revoked ? ' primary' : '') + '" type="button" data-mailbox-action="' + mode + '" data-mailbox-provider="' + a(provider) + '"' +
       (disabled ? ' disabled' : '') + '>' + e(text(mode)) + '</button></dd></div>';
   }).join('');
   const feedback = state.error ? text(state.error) : state.notice || (state.loading && !overview ? text('loading') : '');
   return '<section class="settings-group mailbox-settings" data-mailbox-settings aria-labelledby="settings-mailboxes">' +
-    '<header><h2 id="settings-mailboxes">' + e(text('title')) + '</h2><span class="settings-behavior">' + e(text('independent')) + '</span></header>' +
+    '<header><h2 id="settings-mailboxes">' + e(text('title')) + '</h2></header>' +
     '<div aria-busy="' + Boolean(state.loading || state.busy) + '"><dl class="mailbox-settings-summary">' + rows + '</dl>' +
     jobMarkup(ctx, overview) +
-    '<p class="mailbox-settings-note">' + e(text('note')) + '</p>' +
     '<p class="mailbox-settings-feedback" role="' + (state.error ? 'alert' : 'status') + '" aria-live="polite">' + e(feedback) + '</p>' +
     '</div></section>';
 }
@@ -262,6 +263,7 @@ export function createMailboxSettingsController({ state, api, source, context, r
       const payload = await api.getSetupMailboxes(current.source);
       if (version !== epoch) return;
       current.overview = payload?.result || null; current.error = '';
+      state.gmailRevoked = gmailRevokedAt(current.overview); patchMailboxAlert(root(), context());
       // Google authorization finishes in another tab; the window closes once the mailbox shows as connected.
       const pending = current.dialog?.kind === 'connect' && current.dialog.waiting ? current.dialog : null;
       if (pending) {
@@ -477,6 +479,59 @@ export function createMailboxSettingsController({ state, api, source, context, r
   }
   activate();
   return { activate, mount, patch, leave, load };
+}
+
+// The sidebar entry while Google has revoked the Gmail authorization; one click opens Settings → Mailboxes.
+export function mailboxAlertView(ctx) {
+  if (!ctx.state.gmailRevoked) return '';
+  const label = mailboxText(ctx.language, 'entryRevoked'), title = mailboxText(ctx.language, 'revokedToast');
+  const mark = '<span class="sidebar-update-mark" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 4.25v4.5M8 11.5v.25"/></svg></span>';
+  return '<button class="sidebar-update sidebar-alert" type="button" data-mailbox-alert title="' + a(title) + '" aria-label="' + a(title) + '">' +
+    mark + '<span class="sidebar-update-label">' + e(label) + '</span></button>';
+}
+
+const alertVersions = new WeakMap();
+export function patchMailboxAlert(root, ctx) {
+  const host = root?.querySelector('[data-mailbox-alert-host]');
+  if (!host) return;
+  const html = mailboxAlertView(ctx);
+  if (alertVersions.get(host) === html) return;
+  host.innerHTML = html;
+  alertVersions.set(host, html);
+}
+
+// Outside Settings: when Google revokes the Gmail authorization (changing the Google password does this), say so once
+// per revocation and keep the sidebar entry until Gmail is reconnected.
+export function watchGmailAuthorization({ state, api, notify, context, root = () => document, intervalMs = 300000,
+  setTimer = setTimeout, clearTimer = clearTimeout, openSettings = () => { location.hash = '#settings'; }, onChange = () => {} }) {
+  let timer = null, told = null, watching = false;
+  const mounted = new WeakSet();
+  async function check() {
+    clearTimer(timer); timer = null;
+    try {
+      const overview = (await api.getSetupMailboxes())?.result;
+      if (overview) {
+        const revoked = gmailRevokedAt(overview), changed = revoked !== (state.gmailRevoked ?? null);
+        state.gmailRevoked = revoked;
+        if (revoked && told !== revoked) { told = revoked; notify(mailboxText(context().language, 'revokedToast'), 'error'); }
+        patchMailboxAlert(root(), context());
+        if (changed) onChange(revoked);
+      }
+    } catch { /* Not reachable from this page, or the Backend is restarting: look again later. */ }
+    if (watching) timer = setTimer(check, intervalMs);
+  }
+  function mount() {
+    const page = root();
+    if (!page || mounted.has(page)) return;
+    mounted.add(page);
+    page.addEventListener('click', event => {
+      if (!event.target.closest?.('[data-mailbox-alert]')) return;
+      openSettings();
+      setTimer(() => root()?.querySelector('[data-mailbox-settings]')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 250);
+    });
+  }
+  return { watch() { mount(); if (watching) return; watching = true; void check(); }, check,
+    stop() { watching = false; clearTimer(timer); timer = null; } };
 }
 
 // Outside Settings too: while a mailbox is being added, check now and then and say when it needs the user.

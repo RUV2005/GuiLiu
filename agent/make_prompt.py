@@ -2,11 +2,14 @@
 
 import inspect
 import json
+import logging
+import math
 import os
 import platform
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
-from context_manager import context_records
+from context_manager import context_records, summarized_turn_records
 from model_config import get_model_config
 from runtime_settings import get_setting, get_language
 from tool import open_prompt
@@ -103,16 +106,40 @@ def render_system_prompt(prompt_name, tools, project_directory):
     )
 
 
+# Measured against DashScope's reported input usage, the bundled vocabulary counted 0.96-1.13x the real
+# tokens per step; the margin keeps the estimate at or above real usage. Framing covers role markers.
+TOKEN_MARGIN = 1.05
+MESSAGE_FRAMING = 8
+
+
+# estimate_input_tokens loads this once: the Qwen vocabulary shipped inside the dashscope package.
+@lru_cache(maxsize=1)
+def _qwen_tokenizer():
+    try:
+        from dashscope.tokenizers import get_tokenizer
+        return get_tokenizer("qwen-max")
+    except Exception as error:
+        logging.getLogger("uvicorn.error.make_prompt").warning(
+            "Qwen tokenizer unavailable; budgets fall back to the byte estimate: %s", error)
+        return None
+
+
 # Default counter used by make_prompt; estimates the full assembled input for budget checks.
 # A model-specific token_counter can replace it; this value is not billed token usage.
 def estimate_input_tokens(messages):
-    # UTF-8 bytes plus framing is a conservative estimate, not the provider tokenizer.
-    return 16 + sum(12 + len(row["role"].encode("utf-8")) + len(row["content"].encode("utf-8")) for row in messages)
+    tokenizer = _qwen_tokenizer()
+    if tokenizer is None:
+        # UTF-8 bytes plus framing: several times real usage, but never below it.
+        return 16 + sum(12 + len(row["role"].encode("utf-8")) + len(row["content"].encode("utf-8")) for row in messages)
+    # Text that looks like a special token is counted as plain text, the larger count.
+    tokens = sum(MESSAGE_FRAMING + len(tokenizer.encode(row["content"], allowed_special=set())) for row in messages)
+    return 16 + math.ceil(tokens * TOKEN_MARGIN)
 
 
 # run_react calls this before each model request; its returned package goes to call_model.
 # Orders instructions, summary/state, and context_records into messages without changing context.
 # Also reserves output space and checks input size; it never summarizes or removes history.
+# A summarized current turn shows as the summary, then its question, then the steps after the summary.
 def make_prompt(system_prompt, skill_prompt, context, limits=None, token_counter=None):
     limits = limits or RuntimeLimits.from_env()
     messages = [{"role": "system", "content": system_prompt}]
@@ -131,6 +158,10 @@ def make_prompt(system_prompt, skill_prompt, context, limits=None, token_counter
         state.pop("current_tool_call_id", None)
     if state:
         messages.append({"role": "user", "content": "<task_state>" + json.dumps(state, ensure_ascii=False) + "</task_state>"})
+    # When the current turn's earlier steps were summarized, its question still appears word for word.
+    for row in summarized_turn_records(context):
+        if row.get("role") == "user":
+            messages.append({"role": "user", "content": f"<question>{row['content']}</question>"})
     for row in context_records(context):
         if row["sequence"] <= summary["through_sequence"]:
             continue

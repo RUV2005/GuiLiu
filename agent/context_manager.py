@@ -54,6 +54,34 @@ def context_records(context):
     return sorted(context["messages"] + context["tool_results"], key=lambda row: row["sequence"])
 
 
+# Records of the current turn that compaction already summarized. They stay beside the summary until the
+# next turn starts: prompts show only the summary and the question, while sources stay citable.
+def summarized_turn_records(context):
+    return list(context["summary"].get("turn_records", []))
+
+
+# Every record of the current turn, including steps already summarized; for sources, logs and repair.
+def turn_records(context):
+    turn = context["turn_id"]
+    rows = summarized_turn_records(context) + [row for row in context_records(context) if row["turn_id"] == turn]
+    return sorted(rows, key=lambda row: row["sequence"])
+
+
+# The context after summarizing every record up to cutoff (a complete older turn, or a finished step of
+# the current turn). Summarized records of the current turn move beside the summary; others are dropped.
+def compacted_context(context, cutoff, summary):
+    updated = copy.deepcopy(context)
+    turn = updated["turn_id"]
+    kept = summarized_turn_records(updated) + [
+        row for row in context_records(updated) if row["sequence"] <= cutoff and row["turn_id"] == turn]
+    updated["summary"] = {"content": summary, "through_sequence": cutoff}
+    if kept:
+        updated["summary"]["turn_records"] = kept
+    for key in ("messages", "tool_results"):
+        updated[key] = [row for row in updated[key] if row["sequence"] > cutoff]
+    return updated
+
+
 # Called when constructing, loading, saving or compacting context; returns the validated dict.
 # Checks schema, record order and tool-call/result links so broken history cannot be reused silently.
 def validate_context(context):
@@ -69,6 +97,12 @@ def validate_context(context):
     cutoff = summary.get("through_sequence")
     if type(cutoff) is not int or cutoff < 0:
         raise ValueError("Invalid summary boundary")
+    kept = summary.get("turn_records", [])
+    if not isinstance(kept, list) or any(
+        not isinstance(row, dict) or row.get("turn_id") != context["turn_id"]
+        or type(row.get("sequence")) is not int or row["sequence"] > cutoff for row in kept
+    ):
+        raise ValueError("Summarized records must belong to the current turn")
     if not isinstance(context["messages"], list) or not isinstance(context["tool_results"], list):
         raise ValueError("Messages and tool results must be lists")
     sequences, ids = set(), set()
@@ -189,6 +223,8 @@ class ContextManager:
             raise ContextBusyError("This task is waiting for an insight reply; use the reply endpoint")
         if state.get("current_tool_call_id") or state["status"] in {"running", "waiting_tool"}:
             raise RuntimeError("Unfinished task requires review; tools will not be replayed automatically")
+        # The summary already covers the previous turn's summarized steps; snapshots keep them in full.
+        self.context["summary"].pop("turn_records", None)
         self.context["turn_id"] += 1
         self.context["call_state"] = {"status": "running", "current_tool_call_id": None}
         self.append_message("user", user_input)
@@ -271,24 +307,26 @@ class ContextManager:
         save_context(self.context, path)
         return path
 
-    # Used by budget-triggered dialogue compaction and explicit maintenance.
+    # Used by budget-triggered compaction (every Agent) and explicit maintenance.
     # Calls snapshot, passes the previous summary and selected records to summarizer, then saves.
-    # Only complete older turns are removed; callback/save failure leaves active history unchanged.
+    # Removes complete older turns, or finished steps of the current turn (kept beside the summary);
+    # callback/save failure leaves active history unchanged.
     def compact(self, summarizer, through_sequence=None):
-        """Snapshot first; summarize complete older turns with a caller-supplied function."""
+        """Snapshot first; summarize older turns or finished current-turn steps with a caller-supplied function."""
         records = context_records(self.context)
-        older = [row for row in records if row["turn_id"] < self.context["turn_id"]]
-        if not older:
+        turn = self.context["turn_id"]
+        older = [row for row in records if row["turn_id"] < turn]
+        if through_sequence is None and not older:
             raise ValueError("No older turn is available to summarize")
         cutoff = through_sequence if through_sequence is not None else older[-1]["sequence"]
         selected = [row for row in records if row["sequence"] <= cutoff]
-        if not selected or selected[-1]["sequence"] != cutoff or any(
-            row["turn_id"] >= self.context["turn_id"] for row in selected
-        ):
-            raise ValueError("Compaction boundary must cover older turns only")
-        selected_turns = {row["turn_id"] for row in selected}
+        if not selected or selected[-1]["sequence"] != cutoff:
+            raise ValueError("Compaction boundary must be a record in the active history")
+        if selected[-1]["turn_id"] == turn and "tool_call_id" not in selected[-1]:
+            raise ValueError("Compaction can stop inside the current turn only after a finished step")
+        selected_turns = {row["turn_id"] for row in selected} - {turn}
         if any(row["turn_id"] in selected_turns and row["sequence"] > cutoff for row in records):
-            raise ValueError("Compaction cannot split a turn")
+            raise ValueError("Compaction cannot split an older turn")
         calls = {row["tool_call"]["id"] for row in selected if "tool_call" in row}
         results = {row["tool_call_id"] for row in selected if "tool_call_id" in row}
         if calls != results:
@@ -301,10 +339,7 @@ class ContextManager:
         summary = summarizer(payload)
         if not isinstance(summary, str) or not summary.strip():
             raise ValueError("Summarizer must return non-empty text")
-        updated = copy.deepcopy(self.context)
-        updated["summary"] = {"content": summary, "through_sequence": cutoff}
-        for key in ("messages", "tool_results"):
-            updated[key] = [row for row in updated[key] if row["sequence"] > cutoff]
+        updated = compacted_context(self.context, cutoff, summary)
         validate_context(updated)
         if self.path is not None:
             save_context(updated, self.path)
@@ -324,13 +359,21 @@ class ContextManager:
         return self.context
 
 
+# run_agent_task gives each in-memory task one of these, so its compaction keeps originals like dialogue does.
+def task_snapshot_dir(name, directory=None):
+    root = Path(directory or os.getenv("ABK_CONTEXT_DIR") or Path(__file__).resolve().parent / "context_store")
+    label = re.sub(r"[^A-Za-z0-9_-]+", "_", name or "task").strip("_")[:60] or "task"
+    return root.resolve() / "snapshots" / f"task_{label}_{uuid4().hex}"
+
+
 # run_agent_task uses this context manager to create/load a task and hold its session lock.
 # Dialogue uses load_context + ContextManager; automatic tasks get fresh in-memory context.
 # A missing session ID creates an independent file. Locking covers this Python process only.
+# snapshot_dir is where an in-memory context keeps originals when it compacts.
 @contextmanager
-def open_context(*, session_id=None, directory=None, persistent=True):
+def open_context(*, session_id=None, directory=None, persistent=True, snapshot_dir=None):
     if not persistent:
-        yield ContextManager()
+        yield ContextManager(snapshot_dir=snapshot_dir)
         return
     session_id = session_id or uuid4().hex
     if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session_id):

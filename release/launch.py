@@ -184,11 +184,43 @@ def run(version, args):
     return subprocess.Popen([sys.executable, '-X', 'utf8', '-B', str(folder / 'run.py'), *args], cwd=folder, env=env)
 
 
-def serve(args):
-    held = lock()
+def copy_ready():
+    """This copy's services answer: run.py marked them ready and the frontend responds as this release."""
+    if not (RUNTIME / 'ready.json').is_file():
+        return False
+    try:
+        from urllib.request import ProxyHandler, build_opener
+        port = int((read_json(RUNTIME / 'ports.json') or {})['frontend'])
+        with build_opener(ProxyHandler({})).open(f'http://127.0.0.1:{port}/healthz', timeout=2) as response:
+            return json.load(response).get('service') == 'guiliu-release'
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def attach(args, wait=300):
+    """Another launcher serves this copy and may be switching versions (backing up data, starting the new version).
+    Starting services here would race that switch, so wait until the copy answers, then let run.py open the browser
+    on it. If that launcher ends meanwhile, serve the copy from here."""
+    deadline = time.monotonic() + wait
+    told = False
+    while time.monotonic() < deadline:
+        held = lock()
+        if held is not None:
+            return serve(args, held)
+        if copy_ready():
+            return run(read_json(POINTER)['version'], ['serve', *args]).wait()
+        if not told:
+            print('GUILIU is starting or updating in another window; waiting for it to finish...', flush=True)
+            told = True
+        time.sleep(1)
+    print('GUILIU did not finish starting. Close the other GUILIU window and start again.', flush=True)
+    return 1
+
+
+def serve(args, held=None):
+    held = held or lock()
     if held is None:
-        # Another launcher serves this copy; run.py finds it and opens the browser.
-        return run(read_json(POINTER)['version'], ['serve', *args]).wait()
+        return attach(args)
     restarted = False
     try:
         while True:

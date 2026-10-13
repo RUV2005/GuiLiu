@@ -3,7 +3,7 @@ import { financeAttr } from './finance-colors.js';
 import { escapeHtml as e, escapeAttr as a, formatAmount, formatDate, formatDateTime, formatPercent } from './utils.js';
 import { lineChart } from './charts.js';
 import { pageChartMotion } from './page-chart-motion.js';
-import { ASSET_PERIODS, ACCOUNT_TYPES, assetCurrency, assetDisplayCurrency, assetNumber, assetsData, findAssetAccount, japanInputTime, incomeFormValues, assetHistorySeries, assetHistoryScopeChanged } from './assets-model.js';
+import { ASSET_PERIODS, ACCOUNT_TYPES, assetCurrency, assetDisplayCurrency, assetNumber, assetsData, findAssetAccount, japanInputTime, incomeFormValues, assetHistorySeries } from './assets-model.js';
 
 const versions = new WeakMap();
 let chartObserver;
@@ -99,7 +99,6 @@ function trendView(ctx, data, width) {
           valueFormatter: (value, point) => point.date + ' · ' + (point.partial ? text(ctx, 'assetKnownSubtotal') + ' · ' : '') + money(ctx, value) }) + '</div>'
     : '<div class="asset-empty-trend"><span>—</span><p>' + e(text(ctx, ctx.state.assets.historyLoading || !ctx.state.assets.history && !error ? 'assetLoading' : 'assetHistoryEmpty')) + '</p></div>';
   return note(error, true) + chart + (partial ? note(text(ctx, 'assetHistoryPartial')) : '') +
-    (assetHistoryScopeChanged(history) ? note(text(ctx, 'assetHistoryScopeChanged')) : '') +
     (history.some(point => point.value === null && point.knownValue === null) ? note(text(ctx, 'assetHistoryMissing')) : '') +
     '<div class="asset-trend-footer">' + (history.length && data.accounts.length ? button(ctx, 'history', 'assetHistoryOpen') : '') + '</div>';
 }

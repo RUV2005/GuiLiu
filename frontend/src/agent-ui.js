@@ -1,3 +1,4 @@
+import { profileName, profilePicture } from './user-profile.js';
 import { escapeHtml as html, escapeAttr as attr, simpleRichText, formatDateTime } from './utils.js';
 import { agentText, agentQuestions } from './agent-copy.js';
 import { patchCanvas } from './agent-canvas.js';
@@ -53,20 +54,24 @@ export function patchAgentView(ctx, options = {}) {
     if (expected !== node) container.insertBefore(node, expected);
     preceding = node;
     if (message === replyMotion.message) revealingNode = node;
-    const key = [message.role, message.content, message.timestamp, message.errorKey, message.publicError, message.retryable,
+    const profile = state.userProfile, me = profileName(profile), picture = profilePicture(profile);
+    const key = [message.role, message.content, message.timestamp, message.errorKey, message.publicError, message.retryable, me, picture,
       Boolean(message.canvas || message.legacyVisuals), language, Boolean(message.canvas || message.legacyVisuals || message.retryable) && state.agentLoading, message.transport, message.status];
     const previousKey = contentKeys.get(node);
     if (previousKey && key.every((value, i) => value === previousKey[i])) continue;
     node.className = message.role === 'user' ? 'user-query' : 'agent-response';
     const isLegacy = ['legacy', 'structured'].includes(message.transport);
-    const avatar = message.role === 'user'
-      ? '<span class="agent-message-avatar is-user" role="img" aria-label="' + attr(agentText(language, 'you')) + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20v-2a7 7 0 0 1 14 0v2"></path></svg></span>'
+    const avatar = message.role === 'user' && picture
+      ? '<span class="agent-message-avatar is-user has-picture" role="img" aria-label="' + attr(me || agentText(language, 'you')) + '"><img src="' + attr(picture) +
+        '" alt="" width="24" height="24" referrerpolicy="no-referrer" data-profile-image /></span>'
+      : message.role === 'user'
+      ? '<span class="agent-message-avatar is-user" role="img" aria-label="' + attr(me || agentText(language, 'you')) + '"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20v-2a7 7 0 0 1 14 0v2"></path></svg></span>'
       : '<span class="agent-message-avatar is-agent" aria-hidden="true"></span>';
     const timestamp = message.role === 'user'
       ? '<time datetime="' + attr(message.timestamp) + '">' + html(formatDateTime(message.timestamp, language)) + '</time>'
       : '';
     node.innerHTML = '<header><span class="agent-message-sender">' + avatar +
-      (message.role === 'user' ? '' : '<span>' + html(agentText(language, 'assistant')) + '</span>') + '</span>' + timestamp +
+      (message.role === 'user' ? (me ? '<span class="agent-message-name">' + html(me) + '</span>' : '') : '<span>' + html(agentText(language, 'assistant')) + '</span>') + '</span>' + timestamp +
       '</header>' + (message.role === 'user' ? '<p>' + html(message.content) + '</p>' : '<div class="agent-prose">' + simpleRichText(message.content) + '</div>') +
       (message.role === 'user' && message.status && message.status !== 'completed' ? '<span class="agent-turn-state" role="status" data-turn-status="' + attr(message.status) + '">' + html(historyText(language, message.status)) + '</span>' : '') +
       (message.errorKey ? '<p class="agent-message-error" role="status">' + html(agentText(language, message.errorKey)) + (message.publicError ? ' ' + html(message.publicError) : '') + '</p>' : '') +
