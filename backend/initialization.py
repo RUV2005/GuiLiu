@@ -147,6 +147,21 @@ class SetupError(ValueError):
         self.status = status
 
 
+def diagnostic_codes(values):
+    """Machine-readable validation codes from an Agent error, which may name a sample index and fields
+    (sample_missing_fields:0:merchant); anything else, such as mail text, is dropped."""
+    return [value for value in values[:20] if isinstance(value, str)
+            and re.fullmatch(r"[a-z_]{1,80}(?::[A-Za-z0-9_.,-]{1,120}){0,2}", value)]
+
+
+class AgentRequestError(SetupError):
+    """An Agent request that failed for a reason other than its answer: code says which (model_rate_limited, ...)."""
+
+    def __init__(self, message, status, code):
+        super().__init__(message, status)
+        self.code = code
+
+
 class StepRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step: Literal["api_keys", "gmail", "vector_db", "bank_rules", "account_confirmation", "ocr_source", "complete"]
@@ -250,8 +265,7 @@ class Initialization:
                     diagnostics[key] = value
             types = detail.get("validation_types")
             if isinstance(types, list):
-                diagnostics["validation_types"] = [value for value in types[:20] if isinstance(value, str)
-                                                   and re.fullmatch(r"[a-z_]{1,80}", value)]
+                diagnostics["validation_types"] = diagnostic_codes(types)
             self.log_google_event({"operation": "agent_initialization_request", "route": route,
                                    "http_status": response.status_code, **diagnostics})
             code = diagnostics.get("error_code", "request_failed")
@@ -259,7 +273,7 @@ class Initialization:
                     "invalid_bank_regex", "invalid_model_json", "invalid_model_schema", "invalid_model_evidence"}:
                 from bank_regex_regression import RegexRegressionError
                 raise RegexRegressionError(diagnostics.get("validation_types") or [code])
-            raise SetupError(f"Agent {route} HTTP {response.status_code}; {code}; retry this step", 502)
+            raise AgentRequestError(f"Agent {route} HTTP {response.status_code}; {code}; retry this step", 502, code)
         data = response.json()
         partial = route == "/vectorDB/adr-memory/batch" and isinstance(data.get("result"), dict)
         if data.get("success") is not True and not partial:
@@ -1315,7 +1329,7 @@ class Initialization:
                     attempts_path = self.root / "regex_attempts.json"
                     attempts = read_json(attempts_path, {})
                     # Every run here is the user's own click (confirm, or "generate rules again"), so each one gets the
-                    # full 3-call budget; the saved feedback from earlier attempts is kept for the model. Without this, a
+                    # full call budget (MAX_GENERATIONS); the saved feedback from earlier attempts is kept for the model. Without this, a
                     # budget used up by network or quota failures made every later retry fail at once.
                     record = {**attempts.get(msgid, {}), "regex_generations": 0}
 

@@ -1,7 +1,7 @@
 // These regions have their own keyed/data renderers. Never replace their live
 // contents with the initial shell template during a locale-only update.
 const ownedRegions = '[data-ledger-body], [data-ledger-selection], [data-ledger-structure], ' +
-  '[data-asset-region], [data-market-panel], [data-market-slot], [data-agent-messages], ' +
+  '[data-asset-region], [data-agent-messages], ' +
   '[data-agent-loading], [data-agent-notice], [data-agent-canvas], .agent-suggestions-slot, [data-scroll-dock], ' +
   '#scroll-dock-popover, [data-overview-chart], [data-overview-assets-region], [data-import-page], [data-information-root], [data-runtime-settings], [data-full-mail-import], .toast-region, .is-editing';
 const labelAttributes = ['aria-label', 'aria-description', 'aria-valuetext', 'title', 'placeholder', 'alt', 'data-empty-label', 'data-page-chart-version'];

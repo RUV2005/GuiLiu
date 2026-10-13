@@ -76,13 +76,15 @@ function stage(ctx) {
   const s = ctx.state.importData, t = (key, vars) => importText(ctx, key, vars), job = s.job;
   if (!job) return s.resumeId ? notice(ctx, 'loading') + button('refresh', t('refresh'), Boolean(s.busy)) + button('choose', t('otherFile'), Boolean(s.busy || s.pendingCommit)) : '';
   const working = processingImport(job.state) || job.state === 'mapping_required';
+  // Tasks saved before 0.1.0-rc.13 can still carry the dropped payment-method note.
+  const warnings = (job.warnings || []).filter(item => !String(item).startsWith('multiple_payment_methods:'));
   return `<div class="import-job">
     <div><h2>${h(job.filename)}</h2><p>${h(t('intoAccount', { account: accountName(ctx, job.account_number) }))}</p></div>
     <div class="button-row">${working ? `<span class="import-job-state" role="status">${h(t(job.state))}</span>` : ''}${s.pollingError ? button('refresh', t('refresh'), Boolean(s.busy)) : ''}${button('choose', t('otherFile'), Boolean(s.busy || s.pendingCommit || s.editor))}</div>
     ${processingImport(job.state) ? progressBar(ctx, job) : ''}
     </div>
     ${notice(ctx, job.error, true)}
-    ${(job.warnings || []).map(item => notice(ctx, textValue(item))).join('')}`;
+    ${warnings.map(item => notice(ctx, textValue(item))).join('')}`;
 }
 function mapping(ctx) {
   const s = ctx.state.importData, t = key => importText(ctx, key);
@@ -107,9 +109,7 @@ function summary(ctx) {
   const parts = IMPORT_GROUPS.filter(name => counts[name]).map(name => t('sum_' + name, { count: counts[name] }));
   const sentence = t('sumTotal', { total: job.total }) + parts.join(t('listSeparator')) + t('sumEnd');
   const nothing = !counts.ready && !counts.attention ? `<p class="import-nothing">${h(t(counts.done ? 'allHandled' : 'nothingNew'))}</p>` : '';
-  const c = job.classification, classified = c && c.memory + c.model + c.user > 0
-    ? `<p class="import-classified${c.open ? ' has-open' : ''}" role="status">${h(t('classifiedSummary', c))}</p>` : '';
-  return `<p class="import-sentence" role="status">${h(sentence)}</p>${nothing}${accountHint(ctx)}${classified}`;
+  return `<p class="import-sentence" role="status">${h(sentence)}</p>${nothing}${accountHint(ctx)}`;
 }
 // Rows imported before into another account usually mean the wrong account was chosen for this file.
 function accountHint(ctx) {

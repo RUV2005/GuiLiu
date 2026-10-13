@@ -107,7 +107,7 @@ OpenAI 继续使用同步多文本 Embedding 请求，保留原有字段与截�
 .\.venv\Scripts\python.exe versions\<版本>\smoke.py --frontend-port 5178
 ```
 
-该模式禁用日常任务、市场行情和汇率网络拉取。测试仍运行真实 FastAPI、数据库和前端代理，不伪造 initialized=true、不带真实密钥、不调用 Gmail 或 LLM。测试创建一个虚构现金账户并验证幂等与余额校准，不创建消费记录。重启后使用输出中的账户编号：
+该模式禁用日常任务和汇率网络拉取。测试仍运行真实 FastAPI、数据库和前端代理，不伪造 initialized=true、不带真实密钥、不调用 Gmail 或 LLM。测试创建一个虚构现金账户并验证幂等与余额校准，不创建消费记录。重启后使用输出中的账户编号：
 
 ```powershell
 .\.venv\Scripts\python.exe versions\<版本>\smoke.py --frontend-port 5178 --reuse-account <账户编号>

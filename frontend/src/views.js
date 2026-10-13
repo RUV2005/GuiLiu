@@ -12,8 +12,9 @@ import { overviewChartView, overviewHeatmapView, overviewCategoryDriversView } f
 import { overviewAssetsView } from './overview-assets.js';
 import { runtimeSettingsView } from './runtime-settings-view.js';
 import { mailboxSettingsView } from './mailbox-settings.js';
-import { updateSettingsView } from './update-settings.js';
+import { updateSettingsView, updateEntryView } from './update-settings.js';
 import { sidebarProfileContent, userProfileSettings } from './user-profile.js';
+import { BUILD, isBetaBuild } from './build-info.js';
 import { fullMailImportView } from './full-mail-import-view.js';
 import { shutdownSettingsView } from './system-shutdown.js';
 import { settingsSaveView } from './settings-save.js';
@@ -52,6 +53,12 @@ import {
   progressChart,
   renderAgentPanelVisual,
 } from "./charts.js";
+
+// Development builds say so under the app name, with the version the next release will carry.
+export function betaBadge(ctx, build = BUILD) {
+  if (!isBetaBuild(build)) return '';
+  return '<span class="build-badge" title="' + escapeAttr(text(ctx, 'betaBuild')) + '">Beta ' + escapeHtml(build.version) + '</span>';
+}
 
 function text(ctx, key, variables) {
   return ctx.t ? ctx.t(key, variables) : translate(ctx.language, key, variables);
@@ -143,7 +150,7 @@ export function appShell(ctx) {
       '<div class="brand-row"><a class="brand" href="#overview" aria-label="' + escapeAttr(text(ctx, 'appName')) +
       '"><span class="brand-mark" aria-hidden="true"><img src="/assets/app-icon.svg?v=f9-s4-1" width="36" height="36" alt="" data-brand-theme="dark" /><img src="/assets/app-icon-light.svg?v=f9-s4-1" width="36" height="36" alt="" data-brand-theme="light" /></span><span class="brand-copy"><strong>' +
       escapeHtml(text(ctx, "appName")) +
-      '</strong></span></a><button class="icon-button sidebar-toggle" type="button" data-toggle-sidebar aria-expanded="' + String(!state.settings.sidebarCollapsed) + '" aria-label="Toggle navigation">' +
+      '</strong>' + betaBadge(ctx) + '</span></a><button class="icon-button sidebar-toggle" type="button" data-toggle-sidebar aria-expanded="' + String(!state.settings.sidebarCollapsed) + '" aria-label="Toggle navigation">' +
       icon("panel") + "</button></div>" +
       '<nav class="nav-block" aria-label="' + escapeAttr(text(ctx, "primaryNavigation")) + '">' +
       navLink(ctx, "overview", "overview") +
@@ -157,6 +164,7 @@ export function appShell(ctx) {
           navLink(ctx, "dev-system", "systemManagement") + "</nav>"
         : "") +
       '<div class="sidebar-footer">' +
+      '<div class="sidebar-update-host" data-update-entry-host aria-live="polite">' + updateEntryView(ctx) + '</div>' +
       '<button class="profile-block" type="button" data-user-profile data-route-button="settings">' +
       sidebarProfileContent(ctx, text(ctx, 'currencyBasis', { spend: 'JPY', asset: assetCurrency })) + '</button>' +
       '<div class="sidebar-actions">' +

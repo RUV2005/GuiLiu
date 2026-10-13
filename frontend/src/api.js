@@ -500,6 +500,8 @@ export class ApiClient {
   createIncome(payload, key) { return this.assetWrite('/DB/income', 'POST', payload, key); }
   updateIncome(id, payload, key) { return this.assetWrite('/DB/income/' + encodeURIComponent(id), 'PUT', payload, key); }
   deleteIncome(id, key) { return this.assetWrite('/DB/income/' + encodeURIComponent(id), 'DELETE', undefined, key); }
+  setRepaymentPlan(id, payload, key) { return this.assetWrite('/DB/accounts/' + encodeURIComponent(id) + '/repayment-plan', 'PUT', payload, key); }
+  deleteRepaymentPlan(id, key) { return this.assetWrite('/DB/accounts/' + encodeURIComponent(id) + '/repayment-plan', 'DELETE', undefined, key); }
   assetsOverview(currency) { return this.assetQuery('/DB/assets/overview', { primary_currency: currency }); }
   assetsHistory(query) { return this.assetQuery('/DB/assets/history', query); }
   assetsSettings() { return this.assetQuery('/DB/assets/settings'); }
@@ -509,12 +511,6 @@ export class ApiClient {
   }
   unlinkedDealings(query) { return this.assetQuery('/DB/assets/unlinked-dealings', query); }
   linkDealing(id, payload, key) { return this.assetWrite('/DB/assets/dealings/' + encodeURIComponent(id) + '/link', 'POST', payload, key); }
-
-  marketSnapshot(symbols) {
-    return this.request('/market/quotes?symbols=' + encodeURIComponent(symbols.join(',')), {
-      signal: AbortSignal.timeout(40_000),
-    });
-  }
 
   async checkBackend() {
     await this.listDeals();

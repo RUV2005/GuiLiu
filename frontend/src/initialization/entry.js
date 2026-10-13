@@ -6,8 +6,10 @@ import { createInitializationController } from './controller.js';
 import { mountInitializationView } from './view.js';
 import { copy } from './copy.js';
 import { workspaceLocation } from './startup.js';
+import { pageTitle } from '../build-info.js';
 
 const root = document.querySelector('#app');
+document.title = pageTitle();
 function settings() {
   const read = key => { try { return JSON.parse(localStorage.getItem(key)) || {}; } catch { return {}; } };
   return { ...DEFAULT_SETTINGS, ...read(STORAGE.legacySettings), ...read(STORAGE.settings) };

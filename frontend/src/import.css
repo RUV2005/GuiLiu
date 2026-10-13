@@ -115,8 +115,6 @@
 .import-progress progress::-webkit-progress-value { background: var(--ink-soft); border-radius: 2px; transition: width .3s ease; }
 .import-progress progress::-moz-progress-bar { background: var(--ink-soft); border-radius: 2px; }
 .import-progress span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.import-classified { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; font-variant-numeric: tabular-nums; }
-.import-classified.has-open { color: var(--ink-soft); }
 
 /* Upload: two numbered steps, one start button; the rest waits under Advanced. */
 .import-intro { max-width: 760px; margin: -12px 0 24px; color: var(--ink-soft); font-size: 14px; line-height: 1.8; }

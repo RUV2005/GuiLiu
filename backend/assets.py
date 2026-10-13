@@ -3,6 +3,7 @@
 All mutating helpers share the caller's transaction and never commit it.
 """
 
+import calendar
 import hashlib
 import json
 import sqlite3
@@ -165,6 +166,15 @@ def ensure_asset_schema(conn):
         SourceJSON TEXT NOT NULL DEFAULT '{}',
         FOREIGN KEY(AccountNumber) REFERENCES Account(AccountNumber))""")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_income_data_time ON IncomeData(AccountNumber, EffectiveAt, IncomeID)")
+    # 信用账户的每月自动还款：还款日、可选的还款账户；只处理设置之后的还款日，每月一次。
+    conn.execute("""CREATE TABLE IF NOT EXISTS CreditRepaymentPlan (
+        AccountNumber INTEGER PRIMARY KEY,
+        PaymentDay INTEGER NOT NULL CHECK(PaymentDay BETWEEN 1 AND 31),
+        FromAccountNumber INTEGER,
+        StartedAt TEXT NOT NULL,
+        LastPeriod TEXT,
+        LastError TEXT NOT NULL DEFAULT '',
+        FOREIGN KEY(AccountNumber) REFERENCES Account(AccountNumber))""")
     # 旧版收入仅存在流水中：这里只补收入明细，保留原编号，不重复产生流水或增加余额。
     legacy = _dict_rows(conn.execute("""SELECT c.* FROM AccountChange c
         LEFT JOIN IncomeData i ON i.IncomeID=c.IncomeID
@@ -276,7 +286,7 @@ def _refresh(conn, account_numbers):
                      (balance, account_number))
 
 
-def account_output(conn, account):
+def account_output(conn, account, now=None):
     code = currency(account["CurrencyType"])
     balance = get_account_balance(conn, account["AccountNumber"])
     anchor = conn.execute("""SELECT EffectiveAt FROM AccountChange WHERE AccountNumber=?
@@ -289,6 +299,8 @@ def account_output(conn, account):
             "balance_as_of": utc_now(), "baseline_at": anchor[0] if anchor else None,
             "balance_status": "ready" if balance is not None else "needs_opening_balance"}
     result.update(_account_policy(account["AccountType"], code, account.get("CreditLimit")).output_fields(balance))
+    if account["AccountType"] == "credit":
+        result["repayment_plan"] = repayment_plan_output(conn, account["AccountNumber"], now)
     return result
 
 
@@ -360,6 +372,9 @@ def update_account(conn, account_number, data, operation_id=None):
     conn.execute("UPDATE Account SET AccountName=?, AccountType=?, Institution=?, CreditLimit=? WHERE AccountNumber=?",
                  (data.get("name", old["AccountName"]), data.get("account_type", old["AccountType"]),
                   data.get("institution", old["Institution"]), limit, account_number))
+    if account_type != "credit":
+        # 只有信用账户会自动还款；改成其他类型时一并取消。
+        conn.execute("DELETE FROM CreditRepaymentPlan WHERE AccountNumber=?", (account_number,))
     _refresh(conn, [account_number])
     return account_output(conn, get_account(conn, account_number))
 
@@ -381,14 +396,22 @@ def calibrate_balance(conn, account_number, data, operation_id):
             "account": account_output(conn, get_account(conn, account_number))}
 
 
-def record_credit_repayment(conn, account_number, data, operation_id):
+def _check_repayment_accounts(conn, account_number, from_account_number):
+    """The credit account being repaid and, when named, the separate non-credit account in its currency that pays."""
     credit = get_account(conn, account_number)
-    payer = get_account(conn, data["from_account_number"])
-    if credit["AccountType"] != "credit" or payer["AccountType"] == "credit" or account_number == payer["AccountNumber"]:
-        raise AssetError("Repayment requires a separate non-credit paying account and a credit receiving account")
-    code = currency(credit["CurrencyType"])
-    if currency(payer["CurrencyType"]) != code:
+    payer = get_account(conn, from_account_number) if from_account_number is not None else None
+    if credit["AccountType"] != "credit" or payer is not None and (
+            payer["AccountType"] == "credit" or account_number == payer["AccountNumber"]):
+        raise AssetError("Repayment requires a credit receiving account and, if named, a separate non-credit paying account")
+    if payer is not None and currency(payer["CurrencyType"]) != currency(credit["CurrencyType"]):
         raise AssetError("Cross-currency repayments require settlement support")
+    return credit, payer
+
+
+def record_credit_repayment(conn, account_number, data, operation_id):
+    # 不指定付款账户时只减少信用账户欠款（钱来自未记账的账户）；指定时两边各记一笔。
+    credit, payer = _check_repayment_accounts(conn, account_number, data.get("from_account_number"))
+    code = currency(credit["CurrencyType"])
     amount = minor_amount(data["amount"], code)
     effective = timestamp(data["effective_at"])
     if amount <= 0 or effective > utc_now():
@@ -398,17 +421,134 @@ def record_credit_repayment(conn, account_number, data, operation_id):
         AND ChangeType='credit_repayment_in' AND json_extract(SourceJSON,'$.reference')=? LIMIT 1""",
         (account_number, reference)).fetchone():
         raise AssetError("Repayment reference already recorded", 409)
-    source = {"from_account_number": payer["AccountNumber"], "to_account_number": account_number,
+    source = {"from_account_number": payer["AccountNumber"] if payer else None, "to_account_number": account_number,
               "amount": major_amount(amount, code), "reference": reference}
+    if data.get("monthly"):
+        source["monthly"] = data["monthly"]
     # 双边流水共用调用方事务，不创建消费或收入；未知付款余额仍保留为 null。
     debit = _append(conn, payer["AccountNumber"], -amount, "credit_repayment_out", effective,
-                    operation_id, note=data.get("note", ""), source=source)
+                    operation_id, note=data.get("note", ""), source=source) if payer else None
     credit_id = _append(conn, account_number, amount, "credit_repayment_in", effective,
                         operation_id, note=data.get("note", ""), source=source)
-    _refresh(conn, [account_number, payer["AccountNumber"]])
+    _refresh(conn, [account_number] + ([payer["AccountNumber"]] if payer else []))
     return {"debit_change_id": debit, "credit_change_id": credit_id,
-            "from_account": account_output(conn, get_account(conn, payer["AccountNumber"])),
+            "from_account": account_output(conn, get_account(conn, payer["AccountNumber"])) if payer else None,
             "account": account_output(conn, get_account(conn, account_number))}
+
+
+def local_now():
+    # 还款日按本机所在时区计算：每月那一天的 0 点。
+    return datetime.now().astimezone()
+
+
+def _payment_moment(year, month, day, tz):
+    # 没有这一天的月份（如 2 月 30 日）按当月最后一天。
+    return datetime.combine(date(year, month, min(day, calendar.monthrange(year, month)[1])), time(), tz)
+
+
+def _next_months(year, month):
+    while True:
+        yield year, month
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def set_repayment_plan(conn, account_number, data, now=None):
+    """Repay the whole debt every month on payment_day, from from_account_number when given. Only payment days after
+    this call count, so changing the day never repays a past date; a month already repaid is not repaid again."""
+    day = data["payment_day"]
+    if not isinstance(day, int) or not 1 <= day <= 31:
+        raise AssetError("payment_day must be between 1 and 31")
+    _check_repayment_accounts(conn, account_number, data.get("from_account_number"))
+    started = timestamp((now or local_now()).isoformat())
+    conn.execute("""INSERT INTO CreditRepaymentPlan(AccountNumber,PaymentDay,FromAccountNumber,StartedAt,LastPeriod,LastError)
+        VALUES (?,?,?,?,NULL,'') ON CONFLICT(AccountNumber) DO UPDATE SET PaymentDay=excluded.PaymentDay,
+        FromAccountNumber=excluded.FromAccountNumber, StartedAt=excluded.StartedAt, LastError=''""",
+        (account_number, day, data.get("from_account_number"), started))
+    return account_output(conn, get_account(conn, account_number), now)
+
+
+def delete_repayment_plan(conn, account_number):
+    get_account(conn, account_number)
+    conn.execute("DELETE FROM CreditRepaymentPlan WHERE AccountNumber=?", (account_number,))
+    return account_output(conn, get_account(conn, account_number))
+
+
+def _plan(conn, account_number):
+    rows = _dict_rows(conn.execute("SELECT * FROM CreditRepaymentPlan WHERE AccountNumber=?", (account_number,)))
+    return rows[0] if rows else None
+
+
+def _due_payments(plan, now):
+    """(period YYYY-MM, moment) for each payment day after the plan was set, up to now, not yet repaid; oldest first."""
+    tz = now.tzinfo
+    started = datetime.fromisoformat(plan["StartedAt"]).astimezone(tz)
+    due = []
+    for year, month in _next_months(started.year, started.month):
+        if (year, month) > (now.year, now.month):
+            break
+        moment, period = _payment_moment(year, month, plan["PaymentDay"], tz), f"{year:04d}-{month:02d}"
+        if started < moment <= now and period > (plan["LastPeriod"] or ""):
+            due.append((period, moment))
+    return due
+
+
+def repayment_plan_output(conn, account_number, now=None):
+    plan = _plan(conn, account_number)
+    if not plan:
+        return None
+    now = now or local_now()
+    started = datetime.fromisoformat(plan["StartedAt"]).astimezone(now.tzinfo)
+    upcoming = None
+    for year, month in _next_months(now.year, now.month):
+        moment = _payment_moment(year, month, plan["PaymentDay"], now.tzinfo)
+        if moment > now and moment > started and f"{year:04d}-{month:02d}" > (plan["LastPeriod"] or ""):
+            upcoming = moment.date().isoformat()
+            break
+    last = _dict_rows(conn.execute("""SELECT ChangeID, ChangeAmount, Currency, EffectiveAt, RecordedAt FROM AccountChange
+        WHERE AccountNumber=? AND ChangeType='credit_repayment_in' AND json_extract(SourceJSON,'$.monthly') IS NOT NULL
+        ORDER BY EffectiveAt DESC, ChangeID DESC LIMIT 1""", (account_number,)))
+    return {"payment_day": plan["PaymentDay"], "from_account_number": plan["FromAccountNumber"],
+            "next_payment_date": upcoming, "last_period": plan["LastPeriod"], "error": plan["LastError"] or None,
+            "last_repayment": {"change_id": last[0]["ChangeID"], "amount": major_amount(last[0]["ChangeAmount"], last[0]["Currency"]),
+                               "effective_at": last[0]["EffectiveAt"], "recorded_at": last[0]["RecordedAt"]} if last else None}
+
+
+def run_due_repayments(conn, now=None):
+    """Record every monthly repayment that is due: the whole debt at 0:00 of the payment day. One savepoint per month,
+    so a failing account keeps its error and the others go ahead. Returns what was recorded."""
+    now = now or local_now()
+    done = []
+    for plan in _dict_rows(conn.execute("SELECT * FROM CreditRepaymentPlan ORDER BY AccountNumber")):
+        for period, moment in _due_payments(plan, now):
+            number = plan["AccountNumber"]
+            conn.execute("SAVEPOINT monthly_repayment")
+            try:
+                account = get_account(conn, number)
+                balance = get_account_balance(conn, number, moment.isoformat())
+                if account["AccountType"] != "credit":
+                    raise AssetError("Only a credit account repays automatically")
+                if balance is None:
+                    raise AssetError("The credit account has no confirmed balance yet")
+                debt, code, change = max(-balance, 0), currency(account["CurrencyType"]), None
+                reference = f"monthly:{number}:{period}"
+                if debt and not conn.execute("""SELECT 1 FROM AccountChange WHERE AccountNumber=? AND
+                        ChangeType='credit_repayment_in' AND json_extract(SourceJSON,'$.reference')=? LIMIT 1""",
+                        (number, reference)).fetchone():
+                    change = record_credit_repayment(conn, number, {
+                        "from_account_number": plan["FromAccountNumber"], "amount": major_amount(debt, code),
+                        "effective_at": moment.isoformat(), "reference": reference, "note": "", "monthly": period},
+                        f"monthly-repayment:{number}:{period}")
+                conn.execute("UPDATE CreditRepaymentPlan SET LastPeriod=?, LastError='' WHERE AccountNumber=?", (period, number))
+                conn.execute("RELEASE SAVEPOINT monthly_repayment")
+                plan["LastPeriod"] = period
+                done.append({"account_number": number, "period": period, "amount": major_amount(debt, code),
+                             "recorded": change is not None})
+            except AssetError as error:
+                conn.execute("ROLLBACK TO SAVEPOINT monthly_repayment")
+                conn.execute("RELEASE SAVEPOINT monthly_repayment")
+                conn.execute("UPDATE CreditRepaymentPlan SET LastError=? WHERE AccountNumber=?", (str(error)[:300], number))
+                break
+    return done
 
 
 def _active_entry(conn, field, value, kind):

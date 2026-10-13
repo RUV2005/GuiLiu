@@ -1,6 +1,6 @@
 import { t, localeFor } from './i18n.js';
 import { financeAttr } from './finance-colors.js';
-import { escapeHtml as e, escapeAttr as a, formatAmount, formatDateTime, formatPercent } from './utils.js';
+import { escapeHtml as e, escapeAttr as a, formatAmount, formatDate, formatDateTime, formatPercent } from './utils.js';
 import { lineChart } from './charts.js';
 import { pageChartMotion } from './page-chart-motion.js';
 import { ASSET_PERIODS, ACCOUNT_TYPES, assetCurrency, assetDisplayCurrency, assetNumber, assetsData, findAssetAccount, japanInputTime, incomeFormValues, assetHistorySeries, assetHistoryScopeChanged } from './assets-model.js';
@@ -26,6 +26,23 @@ const field = (ctx, key, content) => '<label class="field"><span>' + e(text(ctx,
 const creditFacts = (ctx, account) => account?.account_type === 'credit' ? '<dl class="readonly-grid">' +
   [['assetCreditLimit', 'credit_limit'], ['assetOutstanding', 'outstanding_balance'], ['assetAvailableCredit', 'available_credit']].map(([key, name]) =>
     '<div><dt>' + e(text(ctx, key)) + '</dt><dd>' + e(money(ctx, account[name], account.currency)) + '</dd></div>').join('') + '</dl>' : '';
+// A credit account's monthly repayment: what it does, when next, the last one, and a way to change it.
+export function repaymentView(ctx, account) {
+  if (account?.account_type !== 'credit') return '';
+  const plan = account.repayment_plan;
+  let line = text(ctx, 'assetRepaymentNone'), extra = '';
+  if (plan) {
+    const payer = plan.from_account_number == null ? null : findAssetAccount(ctx.state, plan.from_account_number);
+    line = [text(ctx, 'assetRepaymentSummary', { day: plan.payment_day }),
+      plan.from_account_number == null ? text(ctx, 'assetRepaymentUnbound') : text(ctx, 'assetRepaymentFrom', { account: payer?.name || '#' + plan.from_account_number }),
+      ...(plan.next_payment_date ? [text(ctx, 'assetRepaymentNext', { date: formatDate(plan.next_payment_date + 'T00:00:00', ctx.language) })] : [])].join(' · ');
+    if (plan.last_repayment) extra += '<p class="asset-repayment-last">' + e(text(ctx, 'assetRepaymentLast', {
+      date: formatDate(plan.last_repayment.effective_at, ctx.language), amount: money(ctx, plan.last_repayment.amount, account.currency) })) + '</p>';
+    if (plan.error) extra += note(text(ctx, 'assetRepaymentFailed', { error: plan.error }), true);
+  }
+  return '<section class="asset-repayment"><h3>' + e(text(ctx, 'assetRepayment')) + '</h3><p>' + e(line) + '</p>' + extra +
+    '<div class="button-row">' + button(ctx, 'repayment', plan ? 'assetRepaymentEdit' : 'assetRepaymentSet', account.account_number) + '</div></section>';
+}
 const input = (name, value = '', extra = '') => '<input name="' + name + '" value="' + a(value ?? '') + '" ' + extra + ' />';
 export const accountOptions = (ctx, current, accounts = ctx.state.assets.accounts) => accounts.map((account) => option(account.account_number, '#' + account.account_number + ' ' + account.name + ' · ' + account.currency, current)).join('');
 
@@ -103,7 +120,7 @@ function accountRows(ctx, data) {
 
 function allocationView(ctx, data) {
   if (!data.allocation.length) return '<p class="asset-empty-compact">' + e(text(ctx, data.overview && !data.complete ? 'assetAllocationUnknown' : 'assetNoAllocation')) + '</p>';
-  return (data.complete ? '' : note(text(ctx, data.allocation.some(account => account.percent !== null) ? 'assetAllocationPartial' : 'assetAllocationUnknown'))) + '<div class="asset-allocation-list" data-page-chart="assets-allocation" data-page-chart-type="allocation" data-page-chart-version="' + a(JSON.stringify([data.currency, data.allocation.map(account => [account.account_number, account.name, account.value])])) + '">' + data.allocation.map(account =>
+  return (data.complete ? '' : note(text(ctx, data.allocation.some(account => account.percent !== null) ? 'assetAllocationPartial' : 'assetAllocationUnknown'))) + '<div class="asset-allocation-list" data-page-chart="assets-allocation" data-page-chart-type="allocation" data-page-chart-version="' + a(JSON.stringify([data.currency, data.allocation.map(account => [account.account_number, account.name, account.value])])) + '">' + data.allocation.map((account, index, rows) => (account.debt && !rows[index - 1]?.debt ? '<p class="asset-allocation-group">' + e(text(ctx, 'assetDebt')) + '</p>' : '') +
     '<div class="asset-allocation-item" data-asset-allocation-account="' + a(account.account_number) + '"><div><span class="asset-allocation-name" title="' + a(account.name + ' · #' + account.account_number) + '">' + e(account.name) + '</span><strong title="' + a(text(ctx, 'assetAllocationShare')) + '">' + e(account.percent === null ? '—' : formatPercent(account.percent, ctx.language)) +
     '</strong></div><div class="asset-allocation-track" aria-hidden="true"><i class="finance-fill"' + financeAttr(account.value) + ' style="width:' + (account.percent ?? 0).toFixed(3) + '%"></i></div><span class="asset-allocation-value"' + financeAttr(account.value) + '>' +
     e(money(ctx, account.value)) + '</span></div>').join('') + '</div>';
@@ -137,7 +154,7 @@ export function assetsView(ctx, { pageHeader, icon }) {
       '<th' + (key === 'assetConvertedValue' ? ' data-asset-currency-heading' : '') + '>' + e(text(ctx, key, { currency: currencyLabel(assetDisplayCurrency(ctx.state)) })) + '</th>').join('') + '</tr></thead><tbody data-asset-region="rows">' + slots.rows +
     '</tbody></table></div><div class="asset-account-matches" data-asset-region="matches">' + slots.matches + '</div></section><aside class="editorial-section asset-allocation-section"><header class="section-header"><h2>' +
     e(text(ctx, 'assetAllocation')) + '</h2></header>' + region('allocation') + '</aside></div>' +
-    '<section class="asset-market-band"><div data-market-slot></div></section></section>';
+    '</section>';
 }
 
 export function primeAssetsView(ctx) {
@@ -182,7 +199,7 @@ export function patchAssetsView(ctx) {
 function changesView(ctx, data) {
   const rows = data.items || [];
   return note(data.error, true) + '<div class="asset-change-list">' + (rows.map((row) => '<article class="asset-change-row"><div><strong>' +
-    e(text(ctx, 'assetChange_' + row.change_type)) + '</strong><span>' + e(formatDateTime(row.effective_at, ctx.language)) + '</span></div><b' + financeAttr(row.change_type === 'opening' ? row.confirmed_balance : row.amount) + '>' +
+    e(text(ctx, row.source?.monthly ? 'assetChangeMonthly' : 'assetChange_' + row.change_type)) + '</strong><span>' + e(formatDateTime(row.effective_at, ctx.language)) + '</span></div><b' + financeAttr(row.change_type === 'opening' ? row.confirmed_balance : row.amount) + '>' +
     e(row.change_type === 'opening' ? money(ctx, row.confirmed_balance, row.currency) : money(ctx, row.amount, row.currency)) +
     '</b><p>' + e(row.note || '') + (row.dealing_number ? ' <button class="text-button" data-assets-deal="' + row.dealing_number + '">#' + row.dealing_number + '</button>' : '') +
     '</p></article>').join('') || note(text(ctx, data.loading ? 'loading' : 'assetRecordsEmpty'))) + '</div>' +
@@ -204,7 +221,7 @@ export function assetModalContent(ctx, { modalHeader }) {
   }
   if (kind === 'detail') return heading(account?.name || '#' + data.id, account?.institution || '') +
     '<div class="asset-detail-balance"><span>' + e(text(ctx, 'assetOriginalBalance')) + '</span><strong' + financeAttr(account?.balance) + '>' + e(money(ctx, account?.balance, account?.currency)) + '</strong></div>' +
-    creditFacts(ctx, account) +
+    creditFacts(ctx, account) + repaymentView(ctx, account) +
     '<div class="button-row">' + button(ctx, 'account', 'assetEditAccount', data.id) + button(ctx, 'calibrate', 'assetCalibrate', data.id) + button(ctx, 'income', 'assetAddIncome') + '</div>' +
     '<h3>' + e(text(ctx, 'assetChanges')) + '</h3>' + note(text(ctx, 'assetChangesAudit')) +
     '<form data-assets-changes-filter class="asset-record-filters">' + field(ctx, 'startDate', input('start', data.start, 'type="date"')) +
@@ -217,7 +234,7 @@ export function assetModalContent(ctx, { modalHeader }) {
       '</h3><div class="asset-valuation-history">' + [...row.items].reverse().map((day) => '<div><time>' + day.date + '</time><strong' + financeAttr(day.closing_balance) + '>' +
         e(money(ctx, day.closing_balance, row.currency)) + '</strong><span' + financeAttr(day.converted_balance) + '>' + e(money(ctx, day.converted_balance)) + '</span></div>').join('') + '</div></section>').join('') + '</div>';
   }
-  const title = { account: account ? 'assetEditAccount' : 'assetAddAccount', calibrate: 'assetCalibrate', income: data.income_id ? 'edit' : 'assetAddIncome' }[kind];
+  const title = { account: account ? 'assetEditAccount' : 'assetAddAccount', calibrate: 'assetCalibrate', income: data.income_id ? 'edit' : 'assetAddIncome', repayment: 'assetRepayment' }[kind];
   let fields = '', hint = '';
   if (kind === 'account') {
     hint = text(ctx, account ? 'assetCurrencyHint' : 'assetCreateHint');
@@ -238,6 +255,15 @@ export function assetModalContent(ctx, { modalHeader }) {
       field(ctx, credit ? 'assetConfirmedDebt' : 'assetConfirmed', input('confirmed_balance', credit ? account?.outstanding_balance ?? '' : '', 'inputmode="decimal" required autofocus')) +
       field(ctx, 'assetEffective', input('effective_at', japanInputTime(), 'type="datetime-local" step="1" required')) +
       field(ctx, 'assetNote', input('note', '', 'maxlength="1000"'));
+  } else if (kind === 'repayment') {
+    // Pays from an ordinary account in the card's currency, or from none (only the card's debt is cleared).
+    const plan = account?.repayment_plan;
+    const payers = ctx.state.assets.accounts.filter((row) => row.account_type !== 'credit' && row.currency === account?.currency && row.account_number !== account?.account_number);
+    hint = text(ctx, 'assetRepaymentHint');
+    fields = '<p class="full">' + e(account?.name || '') + ' · ' + e(account?.currency || '') + '</p>' +
+      field(ctx, 'assetRepaymentDay', '<select name="payment_day" required>' + Array.from({ length: 31 }, (_, i) => option(i + 1, text(ctx, 'assetRepaymentDayOption', { day: i + 1 }), plan?.payment_day ?? 27)).join('') + '</select>') +
+      field(ctx, 'assetRepaymentAccount', '<select name="from_account_number">' + option('', text(ctx, 'assetRepaymentNoAccount'), plan?.from_account_number ?? '') +
+        accountOptions(ctx, plan?.from_account_number ?? '', payers) + '</select>');
   } else if (kind === 'income') {
     const original = incomeFormValues(data);
     const selected = data.account_number || (ctx.state.assetPreview.account !== 'all' ? ctx.state.assetPreview.account : ctx.state.assets.accounts[0]?.account_number);
@@ -252,7 +278,9 @@ export function assetModalContent(ctx, { modalHeader }) {
     hint = text(ctx, 'assetSettlementHint') + (original.needsVerification ? ' ' + text(ctx, 'assetIncomeVerify') : '');
   }
   return heading(text(ctx, title), hint) + '<form class="modal-form" data-assets-form="' + kind + '">' + fields +
-    '<p class="asset-form-error full" role="alert" data-assets-form-error></p><footer><button type="button" class="button" data-close-modal>' + e(text(ctx, 'cancel')) +
+    '<p class="asset-form-error full" role="alert" data-assets-form-error></p><footer>' +
+    (kind === 'repayment' && account?.repayment_plan ? '<button type="button" class="button danger-quiet" data-assets-repayment-off="' + a(account.account_number) + '">' + e(text(ctx, 'assetRepaymentOff')) + '</button>' : '') +
+    '<button type="button" class="button" data-close-modal>' + e(text(ctx, 'cancel')) +
     '</button><button class="button primary" type="submit"' + (kind === 'income' && !ctx.state.assets.accounts.length ? ' disabled' : '') + '>' +
     e(text(ctx, 'save')) + '</button></footer></form>';
 }

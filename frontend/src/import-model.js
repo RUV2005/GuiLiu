@@ -155,7 +155,8 @@ export function groupCounts(job) {
     existing: n('duplicate'), excluded: n('excluded'), done: n('imported') + n('skipped') };
 }
 const ISSUE_NOTES = { refund_requires_review: 'noteRefund', payment_requires_review: 'notePayment', account_currency_mismatch: 'account_currency_mismatch',
-  conflicting_rows_with_same_identity: 'conflicting_rows_with_same_identity', row_processing_failed: 'row_processing_failed' };
+  conflicting_rows_with_same_identity: 'conflicting_rows_with_same_identity', row_processing_failed: 'row_processing_failed',
+  classification_uncertain: 'noteCheckCategory' };
 // Why a row is where it is, in plain words (keys of the import copy; vars fill them in).
 export function rowReasons(row, account) {
   const state = rowStatus(row), issues = row.issues || [], candidates = row.duplicate_candidates || [], out = [];

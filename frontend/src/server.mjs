@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { safeFilePath } from './static-path.mjs';
-import { createMarketHandler } from './market-service.mjs';
 import { createLocalAuth } from './local-auth.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -14,7 +13,6 @@ const port = Number(process.env.PORT || 3000);
 const backend = process.env.BACKEND_URL || 'http://127.0.0.1:8001';
 const agent = process.env.AGENT_URL || 'http://127.0.0.1:8000';
 const auth = await createLocalAuth({ root, host, port, backend, agent });
-const market = createMarketHandler();
 const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
   '.mjs': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
@@ -65,10 +63,6 @@ const server = createServer(async (req, res) => {
     if (p === '/agent/prompts' || p.startsWith('/agent/prompts/')) return await proxy(req, res, agent, p.slice(6) + url.search);
     if (p === '/agent/openapi.json') return await proxy(req, res, agent, '/openapi.json');
     if (p.startsWith('/agent/')) return await proxy(req, res, agent, p + url.search);
-    if (p.startsWith('/market/')) {
-      if (process.env.GUILIU_SMOKE_TEST === '1') return reply(res, 503, { success: false, error: 'Market network disabled in smoke test' });
-      return await market(req, res);
-    }
     // Only public UI assets are served; no test tools, package metadata or server source.
     if (!['GET', 'HEAD'].includes(req.method)) return reply(res, 405, 'Method not allowed', 'text/plain');
     const publicPath = ['/', '/index.html', '/initialization.html'].includes(p)

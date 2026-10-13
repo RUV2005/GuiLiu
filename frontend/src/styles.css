@@ -15,6 +15,7 @@
   --accent-soft: #22263a;
   --positive: #759b84;
   --warning: #c59655;
+  --update-blue: #4d8dff;
   --danger: #d26873;
   --finance-green: #8fb29b;
   --finance-red: #de8d97;
@@ -266,6 +267,16 @@ svg {
 
 .brand-copy:lang(en) strong {
   font-size: 16px;
+}
+
+.build-badge {
+  justify-self: start;
+  padding: 0 6px;
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  border-radius: 8px;
+  font: 600 10px/16px var(--font-numeric);
+  white-space: nowrap;
 }
 
 .profile-block small {
@@ -3383,6 +3394,21 @@ button.category-tag:hover:not(.is-editing) {
 .mailbox-settings-feedback { min-height: 1.7em; margin: 12px 0 0; color: var(--ink); font: 400 13px/1.7 var(--font-ui); overflow-wrap: anywhere; }
 .mailbox-settings-feedback[role="alert"] { color: var(--danger); }
 .update-progress { width: 100%; max-width: 420px; height: 6px; margin-top: 8px; accent-color: var(--accent); }
+/* Sidebar update entry, above the profile block: a small blue mark and a short line of text. */
+.sidebar-update-host:empty { display: none; }
+.sidebar-update { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 10px; color: var(--ink-soft);
+  background: transparent; border: 0; border-radius: 8px; font: 500 12px/1.3 var(--font-ui); text-align: left; cursor: pointer; }
+.sidebar-update:hover:not(:disabled) { color: var(--ink); background: var(--sidebar-hover, var(--surface-hover)); }
+.sidebar-update:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--update-blue); }
+.sidebar-update:disabled { cursor: progress; }
+.sidebar-update-mark { display: grid; flex: 0 0 18px; width: 18px; height: 18px; place-items: center; color: #fff; background: var(--update-blue); border-radius: 50%; }
+.sidebar-update-mark svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sidebar-update.is-busy .sidebar-update-mark { animation: sidebar-update-pulse 1.6s ease-in-out infinite; }
+.sidebar-update-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sidebar-collapsed .sidebar-update { justify-content: center; padding-inline: 0; }
+.sidebar-collapsed .sidebar-update-label { display: none; }
+@keyframes sidebar-update-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .sidebar-update.is-busy .sidebar-update-mark { animation: none; } }
 .update-notes { margin-top: 10px; font: 400 13px/1.7 var(--font-ui); }
 .update-notes summary { width: fit-content; cursor: pointer; color: var(--ink-soft); }
 .update-notes p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }

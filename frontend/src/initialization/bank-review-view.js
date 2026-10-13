@@ -19,6 +19,7 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
   root.innerHTML = `<div class="setup-review-grid">
     <section class="setup-review-region" aria-labelledby="setup-sources-title"><header class="setup-region-header">${label('scanResults', 'h2', 'id="setup-sources-title"')}</header>
       <div class="setup-rule-summary" data-rule-summary role="status" hidden></div><div data-review-sources></div>
+      ${label('creditBalanceHint', 'p', 'class="setup-note"')}
       <div class="setup-inline-actions">${action(t('saveSelection'), 'save-selected')}${action(t('retryConfirmation'), 'retry-confirmation')}</div></section>
     <section class="setup-review-region" aria-labelledby="setup-accounts-title"><header class="setup-region-header">${label('savedAccounts', 'h2', 'id="setup-accounts-title"')}${action(t('addAccount'), 'create')}</header>
       <div data-review-account-feedback role="status"></div><div data-review-accounts></div></section></div>

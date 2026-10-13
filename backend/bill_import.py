@@ -620,9 +620,6 @@ class ImportService:
                         self.save(job)
                         return
                     job.update(preset=preset.model_dump(), preset_id=preset.preset_id, table=metadata, state="analyzing", rows=rows)
-                    methods = {row["normalized"].get("payment_method") for row in rows if row["status"] == "new"}
-                    if len(methods - {None, "", "/", "-"}) > 1:
-                        job["warnings"].append("multiple_payment_methods: all selected rows use the chosen account; import different accounts separately")
                     self.save(job)
                     self.analyze(job)
                     job["state"] = "ready"
@@ -704,6 +701,9 @@ class ImportService:
                     row["classification_source"] = classification.get("source")
                     if not n["main_category"] or not n["sub_category"]:
                         row["issues"].append("classification_required")
+                    elif classification.get("needs_review"):
+                        # The Agent picked a pair as the daily classifier does but was unsure; the row still imports.
+                        row["issues"].append("classification_uncertain")
                     if classification.get("error"):
                         row["issues"].append(classification["error"])
                     if row["status"] == "new":
@@ -834,7 +834,7 @@ class ImportService:
                     if not set(values) <= allowed or any(not isinstance(v, str) or len(v) > 300 for v in values.values()):
                         raise ImportProblem("Only merchant/category corrections are supported")
                     row["normalized"].update(values)
-                    row["issues"] = [issue for issue in row["issues"] if issue != "classification_required"]
+                    row["issues"] = [issue for issue in row["issues"] if issue not in {"classification_required", "classification_uncertain"}]
                     n = row["normalized"]
                     if not n["shop_name"].strip() or (n.get("transaction_kind") != "income" and
                             (not n["main_category"].strip() or not n["sub_category"].strip())):

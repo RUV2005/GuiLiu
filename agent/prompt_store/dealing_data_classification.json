@@ -5,6 +5,324 @@
   "prompt_type": "agent_entry",
   "source_file": "agent/agent.py",
   "source_symbol": "run_dealing_data_classification_agent",
+  "category_options": [
+    {
+      "sub_category": "交通费",
+      "main_category": "交通费"
+    },
+    {
+      "sub_category": "新干线",
+      "main_category": "交通费"
+    },
+    {
+      "sub_category": "公交地铁",
+      "main_category": "交通费"
+    },
+    {
+      "sub_category": "出租车",
+      "main_category": "交通费"
+    },
+    {
+      "sub_category": "机票",
+      "main_category": "交通费"
+    },
+    {
+      "sub_category": "停车费",
+      "main_category": "交通费"
+    },
+    {
+      "sub_category": "内容消费",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "卡拉ok",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "游戏消费",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "旅行",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "电影",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "演出",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "景点门票",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "住宿",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "运动相关开支",
+      "main_category": "休闲娱乐"
+    },
+    {
+      "sub_category": "保险",
+      "main_category": "固定费用"
+    },
+    {
+      "sub_category": "手机话费",
+      "main_category": "固定费用"
+    },
+    {
+      "sub_category": "健身房",
+      "main_category": "固定费用"
+    },
+    {
+      "sub_category": "家庭宽带",
+      "main_category": "固定费用"
+    },
+    {
+      "sub_category": "保险",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "房租",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "水电费",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "水费",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "煤气费",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "电费",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "物业费",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "住房维修",
+      "main_category": "固定开支"
+    },
+    {
+      "sub_category": "看病",
+      "main_category": "宠物"
+    },
+    {
+      "sub_category": "宠物食品",
+      "main_category": "宠物"
+    },
+    {
+      "sub_category": "宠物用品",
+      "main_category": "宠物"
+    },
+    {
+      "sub_category": "洗护寄养",
+      "main_category": "宠物"
+    },
+    {
+      "sub_category": "便利店",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "化妆品",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "周边",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "日用品",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "日用杂货",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "服装类",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "药妆店",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "清洁用品",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "家居用品",
+      "main_category": "日用杂货"
+    },
+    {
+      "sub_category": "会员",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "游戏氪金",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "游戏消费",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "电子游戏",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "网络服务",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "软件订阅",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "云存储",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "影音会员",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "AI 相关费用",
+      "main_category": "网络服务"
+    },
+    {
+      "sub_category": "书本",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "体育用品",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "化妆品",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "周边",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "商场购物",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "电子产品",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "网购",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "购物",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "服装类",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "家具家电",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "鞋包配饰",
+      "main_category": "购物"
+    },
+    {
+      "sub_category": "咖啡店",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "外出就餐",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "外出饮食",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "外卖",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "奶茶",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "零食",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "食材",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "饮料",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "烘焙甜点",
+      "main_category": "饮食费"
+    },
+    {
+      "sub_category": "门诊",
+      "main_category": "医疗健康"
+    },
+    {
+      "sub_category": "体检",
+      "main_category": "医疗健康"
+    },
+    {
+      "sub_category": "药品",
+      "main_category": "医疗健康"
+    },
+    {
+      "sub_category": "牙科",
+      "main_category": "医疗健康"
+    },
+    {
+      "sub_category": "课程",
+      "main_category": "教育学习"
+    },
+    {
+      "sub_category": "考试报名",
+      "main_category": "教育学习"
+    },
+    {
+      "sub_category": "学费",
+      "main_category": "教育学习"
+    },
+    {
+      "sub_category": "礼物",
+      "main_category": "人情往来"
+    },
+    {
+      "sub_category": "红包",
+      "main_category": "人情往来"
+    },
+    {
+      "sub_category": "礼金",
+      "main_category": "人情往来"
+    }
+  ],
   "input_variables": [
     "msgid",
     "mail_text",

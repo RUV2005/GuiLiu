@@ -129,16 +129,20 @@ export function assetsData(state) {
       currency: row.currency, points: (row.items || []).map(day => ({ date: day.date, value: assetNumber(day.closing_balance) })) }))
     .filter(row => row.points.some(point => point.value !== null)) : [];
   const change = assetHistoryChange(history);
-  // Use gross balances for bar lengths so assets and debts cannot cancel out.
-  const total = Number(sumAmounts(scoped.filter(account => assetNumber(account.converted_balance) !== null)
+  // Assets are shares of what is owned and debts shares of what is owed, so a debt never reads as part of the assets
+  // and the two cannot cancel out.
+  const known = scoped.filter(account => assetNumber(account.converted_balance) !== null);
+  const gross = owed => Number(sumAmounts(known.filter(account => (Number(account.converted_balance) < 0) === owed)
     .map(account => String(account.converted_balance).replace(/^-/, '')), currency));
+  const totals = { asset: gross(false), debt: gross(true) };
   const allocation = scoped.map(account => {
-    const value = assetNumber(account.converted_balance);
-    return { account_number: account.account_number, name: account.name, value: account.converted_balance,
+    const value = assetNumber(account.converted_balance), debt = value !== null && value < 0, total = debt ? totals.debt : totals.asset;
+    return { account_number: account.account_number, name: account.name, value: account.converted_balance, debt,
       percent: value === null ? null : total > 0 ? Math.abs(value) / total * 100 : 0 };
   }).sort((left, right) => {
     const a = assetNumber(left.value), b = assetNumber(right.value);
-    return a === null || b === null ? a === b ? 0 : a === null ? 1 : -1 : b - a;
+    if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
+    return left.debt !== right.debt ? (left.debt ? 1 : -1) : left.debt ? a - b : b - a;
   });
   const includedMatches = visibleAccounts.filter(account => account.included_in_assets !== false);
   return { currency, overview, accounts: scoped, visibleAccounts, summary, history, originalHistory, change, allocation,
@@ -154,4 +158,16 @@ export function operationKey(registry, scope, payload) {
   const key = importOperationKey();
   registry.set(scope, { fingerprint, key });
   return key;
+}
+
+// Monthly repayments worth mentioning: one not seen before; on first sight (a new browser) only if from the last week.
+export function newRepayments(accounts, seen = {}, now = Date.now()) {
+  const next = { ...seen }, fresh = [];
+  for (const account of accounts || []) {
+    const last = account?.repayment_plan?.last_repayment;
+    if (!last || next[account.account_number] === last.change_id) continue;
+    if (next[account.account_number] !== undefined || now - Date.parse(last.recorded_at) < 7 * 86400000) fresh.push({ account, repayment: last });
+    next[account.account_number] = last.change_id;
+  }
+  return { fresh, seen: next, changed: JSON.stringify(next) !== JSON.stringify(seen) };
 }

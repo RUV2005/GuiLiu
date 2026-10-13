@@ -22,9 +22,8 @@ trademark rights.
 At run time GUILIU fetches data from third-party services under their own
 terms: current exchange rates from ExchangeRate-API's open access endpoint
 (attribution "Rates By Exchange Rate API" is shown on the assets page), daily
-history rates from Frankfurter (European Central Bank reference rates), market
-quotes from Yahoo Finance and gold prices from gold-api.com, and web search
-results through DDGS. These data are for the user's own use; check each
+history rates from Frankfurter (European Central Bank reference rates), and web
+search results through DDGS. These data are for the user's own use; check each
 service's terms before redistributing them.
 
 The Windows offline edition includes original Python wheels under

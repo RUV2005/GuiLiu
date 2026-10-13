@@ -1,7 +1,8 @@
 import { ApiClient } from "./api.js";
 import { createRuntimeSettingsController } from './runtime-settings-controller.js';
 import { createMailboxSettingsController, watchMailboxJob } from './mailbox-settings.js';
-import { createUpdateController, dailyUpdateNotice } from './update-settings.js';
+import { createUpdateController } from './update-settings.js';
+import { pageTitle } from './build-info.js';
 import { createUserProfileController } from './user-profile.js';
 import { createFullMailImportController } from './full-mail-import-controller.js';
 import { createSystemShutdownController } from './system-shutdown.js';
@@ -28,7 +29,6 @@ import { normalizeCategoryIcons, withCategoryIconPreference, categoryIconText, s
 import { patchAssetsView, primeAssetsView } from './assets-view.js';
 import { ASSET_PERIODS, createAssetState, findAssetAccount, assetsData, assetCurrency, operationKey, decimalAmount } from './assets-model.js';
 import { createAssetsController } from './assets-controller.js';
-import { createMarketPanelController } from './market-view.js';
 import { agentPanel, appShell, modalMarkup, routeView, toastMarkup, transactionEditActions, refreshOverviewTransactions } from "./views.js";
 import { createAgentChat } from './agent-chat.js';
 import { historySendBlocked, sessionTitle } from './agent-history.js';
@@ -79,6 +79,7 @@ import {
 } from "./utils.js";
 
 const root = document.querySelector("#app");
+document.title = pageTitle();
 const amountHover = createChartHover(root, { selector: '[data-money-tip]',
   getContent: mark => transactionAmountHint({ state, language: state.settings.language }, mark.dataset.moneyAmount, mark.dataset.moneyCurrency) });
 const categoryFilterMenu = createCategoryFilterMenu();
@@ -273,22 +274,6 @@ const assetController = createAssetsController({ api, state, context: currentCon
   },
   notify, refreshDeals, findDeal, persistSettings: () => writeJson(STORAGE.settings, state.settings) });
 const dealOperations = new Map();
-const marketPanel = createMarketPanelController({
-  api,
-  getContext: currentContext,
-  render(panel, html) {
-    const focused = panel.contains(document.activeElement);
-    const formValue = focused ? panel.querySelector('[name="symbols"]')?.value : null;
-    panel.outerHTML = html;
-    if (focused) {
-      const input = document.querySelector('[data-market-panel] [name="symbols"]');
-      if (input) {
-        input.value = formValue;
-        input.focus({ preventScroll: true });
-      }
-    }
-  },
-});
 let toastTimer = 0;
 let filterTimer = 0;
 let dragSelection = null;
@@ -523,7 +508,6 @@ function renderApp({ animateAgentCharts = false } = {}) {
   userProfile.mount();
   fullMailImport.mount();
   systemShutdown.patch();
-  marketPanel.mount();
   restoreDealDraftEditors();
   pendingDealRender = false;
   patchAgentView(currentContext(), { animateCharts: animateAgentCharts });
@@ -594,7 +578,6 @@ function renderMain(options = {}) {
     agentInformation.mount();
     plansController.mount();
     runtimeSettings.mount();
-    marketPanel.mount();
   }
   mailboxSettings.mount();
   updateSettings.mount();
@@ -883,7 +866,7 @@ async function initialize() {
   state.initialized = true;
   refreshExchangeRates();
   void startFirstMailImport();
-  void remindAboutUpdates();
+  updateSettings.watch();
   void remindAboutMailbox();
 }
 
@@ -896,14 +879,6 @@ async function remindAboutMailbox() {
   }
 }
 
-// Once a day, mention a newer release; a failed check never affects startup.
-async function remindAboutUpdates() {
-  try {
-    await dailyUpdateNotice({ api, notify, message: version => tx('updateAvailable', { version }) });
-  } catch (error) {
-    console.warn('Update check failed:', error);
-  }
-}
 
 // The first visit after setup imports the whole mailbox once. The Backend decides, so reloads and other tabs never
 // start it twice, and an import cut short by closing the app resumes on the next visit. While setup is still indexing
@@ -1213,7 +1188,6 @@ function setLanguage(language) {
       localizeMarkup(row?.querySelector('[data-deal-edit-actions]'), transactionEditActions(ctx, id, draft.saving));
     }
     primeAssetsView(ctx);
-    marketPanel.relocalize();
     importController.relocalize();
     agentInformation.paint();
     plansController.paint();
@@ -2327,7 +2301,7 @@ function agentContextPayload() {
     return { scope: { page: 'assets', account: state.assetPreview.account, display_currency: data.currency, timezone: 'Asia/Tokyo' },
       data_status: state.assets.error ? 'stale_or_unavailable' : data.overview ? 'backend_account_balances' : 'unavailable',
       assets: data.overview ? { summary: data.summary, complete: data.complete, accounts: data.accounts, as_of: data.overview.as_of, fx: data.overview.fx } : null,
-      holdings: null, note: 'Null balances are unknown, not zero. Market prices are not holdings. Net worth changes are not necessarily income.' };
+      holdings: null, note: 'Null balances are unknown, not zero. Net worth changes are not necessarily income.' };
   }
   const ctx = currentContext();
   return {
@@ -2511,8 +2485,8 @@ window.addEventListener("beforeunload", saveState);
 window.addEventListener('focus', () => void userProfile.refresh());
 window.addEventListener('pagehide', () => userProfile.stop());
 window.addEventListener('pageshow', () => void userProfile.refresh());
-window.addEventListener('pagehide', () => { mailboxSettings.leave(); updateSettings.leave(); });
-window.addEventListener('pageshow', event => { if (event.persisted) { mailboxSettings.mount(); updateSettings.mount(); } });
+window.addEventListener('pagehide', () => { mailboxSettings.leave(); updateSettings.stop(); });
+window.addEventListener('pageshow', event => { if (event.persisted) { mailboxSettings.mount(); updateSettings.mount(); updateSettings.watch(); } });
 window.addEventListener('pagehide', () => fullMailImport.leave());
 window.addEventListener('pagehide', () => systemShutdown.leave());
 window.addEventListener('pageshow', event => { if (event.persisted) fullMailImport.mount(); });

@@ -1,12 +1,16 @@
 import { normalizePrimaryCurrency } from './config.js';
-import { assetCurrency, assetDisplayCurrency, assetNumber, decimalAmount, findAssetAccount, historyRange, overviewAssetQuery, operationKey, createAssetState, debtBalance } from './assets-model.js';
+import { assetCurrency, assetDisplayCurrency, assetNumber, decimalAmount, findAssetAccount, historyRange, overviewAssetQuery, operationKey, createAssetState, debtBalance, newRepayments } from './assets-model.js';
 import { patchAssetChanges } from './assets-view.js';
 import { createAssetCache } from './assets-cache.js';
+import { formatAmount } from './utils.js';
 
 const result = (response) => response.result;
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
-export function createAssetsController({ api, state, context, render, renderOverview, renderModal, openModal, closeModal, notify, refreshDeals, findDeal, persistSettings, cache = createAssetCache() }) {
+const REPAYMENTS_SEEN = 'guiliu-repayments-seen';
+
+export function createAssetsController({ api, state, context, render, renderOverview, renderModal, openModal, closeModal, notify, refreshDeals, findDeal, persistSettings, cache = createAssetCache(),
+  storage = globalThis.localStorage, now = Date.now }) {
   let generation = 0, changesGeneration = 0, settingsBase = '', refreshPromise = null, refreshKey = '', sourceBase = null;
   const operations = new Map();
   const tx = (key, vars) => context().t(key, vars);
@@ -74,7 +78,7 @@ export function createAssetsController({ api, state, context, render, renderOver
           const data = result(await api.assetsOverview(params.primary_currency));
           if (!current()) return;
           if (!data || !Array.isArray(data.accounts) || !data.summary) throw new Error(tx('assetLoadError'));
-          state.assets.overview = data; state.assets.accounts = data.accounts; state.assets.accountsLoaded = true;
+          state.assets.overview = data; state.assets.accounts = data.accounts; state.assets.accountsLoaded = true; announceRepayments(data.accounts);
           state.assets.cachedAt.overview = 0; state.assets.cachedAt.accounts = 0; state.assets.error = ''; overviewArrived = true;
           cache.put(base(), 'overview', params.primary_currency, data);
           cache.put(base(), 'accounts', '', { items: data.accounts });
@@ -99,7 +103,7 @@ export function createAssetsController({ api, state, context, render, renderOver
           const data = result(await api.listAccounts());
           if (!current() || overviewArrived) return;
           if (!Array.isArray(data?.items)) throw new Error(tx('assetLoadError'));
-          state.assets.accounts = data.items; state.assets.accountsLoaded = true; state.assets.cachedAt.accounts = 0;
+          state.assets.accounts = data.items; state.assets.accountsLoaded = true; state.assets.cachedAt.accounts = 0; announceRepayments(data.items);
           cache.put(base(), 'accounts', '', data); paint();
         } catch (error) { if (current() && !overviewArrived) { state.assets.error = error.message; paint(); } }
       })();
@@ -109,6 +113,16 @@ export function createAssetsController({ api, state, context, render, renderOver
       if (epoch === generation) { state.assets.loading = false; state.assets.historyLoading = false; refreshPromise = null; paint(); }
     });
     return refreshPromise;
+  }
+
+  // A monthly repayment the Backend recorded, also while the page was closed, is mentioned once.
+  function announceRepayments(accounts) {
+    let seen = {};
+    try { seen = JSON.parse(storage?.getItem(REPAYMENTS_SEEN) || '{}') || {}; } catch { /* Optional reminder. */ }
+    const update = newRepayments(accounts, seen, now());
+    for (const { account, repayment } of update.fresh)
+      notify(tx('assetRepaymentDone', { account: account.name, amount: formatAmount(Number(repayment.amount), account.currency, context().language) }), 'success');
+    if (update.changed) try { storage?.setItem(REPAYMENTS_SEEN, JSON.stringify(update.seen)); } catch { /* Optional reminder. */ }
   }
 
   function timeFilters(start, end) {
@@ -209,6 +223,9 @@ export function createAssetsController({ api, state, context, render, renderOver
         const confirmed = account.account_type === 'credit' ? debtBalance(value('confirmed_balance'), account.currency) : decimalAmount(value('confirmed_balance'), account.currency);
         payload = { confirmed_balance: confirmed, effective_at: dateValue(value('effective_at')), note: value('note') };
         write = (key) => api.calibrateAccount(original.id, payload, key);
+      } else if (kind === 'repayment') {
+        payload = { payment_day: Number(value('payment_day')), from_account_number: value('from_account_number') ? Number(value('from_account_number')) : null };
+        write = (key) => api.setRepaymentPlan(original.id, payload, key);
       } else if (kind === 'income') {
         const account = findAssetAccount(state, value('account_number'));
         if (!account || assetNumber(account.balance) === null) throw new Error(tx('assetNeedAccount'));
@@ -281,6 +298,20 @@ export function createAssetsController({ api, state, context, render, renderOver
       }
       catch (error) { notify(error.message, 'error'); }
       finally { revoke.disabled = false; }
+      return true;
+    }
+    const off = target.closest('[data-assets-repayment-off]');
+    if (off) {
+      if (off.disabled || !window.confirm(tx('assetRepaymentOffConfirm'))) return true;
+      const id = off.dataset.assetsRepaymentOff, scope = 'repayment-off:' + id;
+      off.disabled = true;
+      try {
+        cache.clear(base());
+        await api.deleteRepaymentPlan(id, operationKey(operations, scope, { id })); operations.delete(scope);
+        if (state.modal?.type === 'asset-repayment') closeModal();
+        notify(tx('assetRepaymentOffDone'), 'success'); await afterWrite();
+      } catch (error) { notify(error.message, 'error'); }
+      finally { off.disabled = false; }
       return true;
     }
     const dealing = target.closest('[data-assets-deal]');

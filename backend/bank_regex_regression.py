@@ -1,14 +1,21 @@
 """Local regression witnesses and a persistent, bounded rule-generation budget."""
 
 import json
+import time
 from email.utils import parseaddr
 from pathlib import Path
+
+import requests
 
 from bank_mail_discovery import mail_text
 from bank_mail_fields import normalize_fields
 from zhenze import BankMailRules, is_cash_withdrawal
 
-MAX_GENERATIONS = 3
+MAX_GENERATIONS = 5          # model calls per sample mail and click; each call may also repair itself once
+ATTEMPTS_PER_CALL = 2
+# Provider hiccups wait and retry without using a generation; key, quota or permission problems stop at once.
+TRANSIENT_CODES = {"model_rate_limited", "model_timeout", "model_network", "model_service_error"}
+TRANSIENT_WAITS = (3, 10, 30)
 
 
 class RegexRepairExhausted(ValueError):
@@ -84,12 +91,15 @@ def validate_examples(proposal, examples, currency):
     for row in examples:
         match = BankMailRules.search(pattern, "Subject: " + row["subject"] + "\n" + row["body"])
         fields = {k: v.strip() for k, v in match.groupdict().items() if v and v.strip()} if match else {}
-        error = None
+        error, error_fields = None, ""
         if row["mail_type"] != kind:
             if match:
                 error = "cross_type_match"
+        elif not match:
+            error = "sample_no_match"
         elif not required <= fields.keys():
             error = "sample_missing_fields"
+            error_fields = ",".join(sorted(required - fields.keys()))
         else:
             try:
                 normalize_fields(fields, currency)
@@ -100,7 +110,7 @@ def validate_examples(proposal, examples, currency):
                     error = "sample_capture_mismatch:" + key
                     break
         if error:
-            issues.append(error + ":" + row["msgid"])
+            issues.append(error + ":" + row["msgid"] + (":" + error_fields if error_fields else ""))
             failed.append(row["msgid"])
             if len(issues) == 5:
                 break
@@ -122,15 +132,24 @@ def _validation_failure(error):
     return None
 
 
-def generate_checked(call, mail, rules, examples, currency, record, save):
+def _transient(error):
+    # Not reaching the Agent at all is safe to repeat; a reply that timed out is not (the Agent may still be working
+    # and the model may already have been called), so that one still ends this run as before.
+    if isinstance(error, requests.ConnectionError):
+        return True
+    return getattr(error, "code", None) in TRANSIENT_CODES
+
+
+def generate_checked(call, mail, rules, examples, currency, record, save, sleep=time.sleep):
     """Reserve each call before dispatch so timeouts/restarts cannot reset the cap."""
     current = rules.load()
+    hiccups = 0
     while record.get("regex_generations", 0) < MAX_GENERATIONS:
         record["regex_generations"] = record.get("regex_generations", 0) + 1
         save(record)
         proposal = None
         try:
-            proposal = call({**mail, "rules": current, "max_attempts": 1,
+            proposal = call({**mail, "rules": current, "max_attempts": ATTEMPTS_PER_CALL,
                              "samples": choose_examples(examples, record.get("regex_failed_samples", [])),
                              "validation_errors": record.get("regex_validation_errors", []),
                              "previous_attempt": record.get("regex_previous_attempt")})
@@ -145,6 +164,15 @@ def generate_checked(call, mail, rules, examples, currency, record, save):
             save(record)
             return proposal
         except Exception as error:
+            if _transient(error) and hiccups < len(TRANSIENT_WAITS):
+                # A rate limit, timeout or network blip says nothing about the rule: wait and ask again.
+                record["regex_generations"] -= 1
+                save(record)
+                sleep(TRANSIENT_WAITS[hiccups])
+                hiccups += 1
+                continue
+            if getattr(error, "code", None) is not None:
+                raise   # the model service needs the user (key, quota, permission); retrying cannot help
             failure = _validation_failure(error)
             if failure is None:
                 raise
@@ -155,4 +183,4 @@ def generate_checked(call, mail, rules, examples, currency, record, save):
                 previous = json.dumps(proposal, ensure_ascii=False)
                 record["regex_previous_attempt"] = previous if len(previous) <= 16000 else None
             save(record)
-    raise RegexRepairExhausted("Bank regex generation reached the 3-call limit; manual review required")
+    raise RegexRepairExhausted(f"Bank regex generation reached the {MAX_GENERATIONS}-call limit; manual review required")

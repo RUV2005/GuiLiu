@@ -29,11 +29,18 @@ class ClassifyRequest(StrictModel):
     category_options: list[CategoryOption] = Field(default_factory=list, max_length=500)
 
 
+# Import follows the daily mail pipeline: the same merchant match in classification memory as its vector lookup
+# (backend api_requset.call_agent_VDB_search), and the daily classifier's pair when nothing identifies the purchase.
+MERCHANT_MAX_DISTANCE = 0.25
+FALLBACK_PAIR = ("购物", "购物")
+
+
 class Classification(StrictModel):
     shop_name: str = Field(min_length=1, max_length=300)
     main_category: str = Field(max_length=100)
     sub_category: str = Field(max_length=100)
     detail_category: str = Field(default="", max_length=100)
+    needs_review: bool = False
 
 
 class BatchItem(StrictModel):
@@ -115,13 +122,17 @@ def category_options(request):
     return [{"main_category": main, "sub_category": sub} for main, sub in merged]
 
 
-def checked_classification(value, request):
+def checked_classification(value, request, fallback=False):
+    """Keep only a complete pair the ledger offers. A model answer without one gets FALLBACK_PAIR marked for review,
+    as the daily classifier does; a remembered pair the ledger no longer offers comes back empty for the model."""
     result = Classification.model_validate(value).model_dump()
     allowed = {(option["main_category"], option["sub_category"]) for option in category_options(request)}
     pair = (result["main_category"], result["sub_category"])
     if not allowed or pair not in allowed:
-        # Keep uncertain categories empty for explicit preview correction.
-        result.update(main_category="", sub_category="", detail_category="")
+        if fallback and FALLBACK_PAIR in allowed:
+            result.update(main_category=FALLBACK_PAIR[0], sub_category=FALLBACK_PAIR[1], detail_category="", needs_review=True)
+        else:
+            result.update(main_category="", sub_category="", detail_category="")
     return result
 
 
@@ -137,7 +148,8 @@ def classify_import(request):
     request = request.model_copy(update={"shop_name": classification_text(request.shop_name),
                                          "product_name": classification_text(request.product_name)})
     try:
-        memory = search_classification_by_raw_shop_name(request.shop_name, item_name=request.product_name)
+        memory = search_classification_by_raw_shop_name(request.shop_name, item_name=request.product_name,
+                                                        max_distance=MERCHANT_MAX_DISTANCE)
     except Exception:
         memory = {"matched": False}
     if memory.get("matched"):
@@ -149,7 +161,7 @@ def classify_import(request):
         if result["main_category"] and result["sub_category"]:
             return {**result, "source": "classification_memory"}
     result = checked_classification(request_json("import_classification", {
-        **request.model_dump(), "category_options": category_options(request)}), request)
+        **request.model_dump(), "category_options": category_options(request)}), request, fallback=True)
     return {**result, "source": "llm"}
 
 
@@ -175,7 +187,10 @@ class CachedEmbedding:
 
 
 def classify_import_batch(request):
-    """Classify many merchant/product pairs: memory first, then the model for what memory does not know.
+    """Classify many merchant/product pairs the way the daily pipeline classifies a new bill: classification memory
+    first, then the model for what memory does not know, under the daily classifier's rules (a cleaned merchant name,
+    and always a pair the ledger offers; FALLBACK_PAIR marked for review when nothing identifies the purchase). The
+    model is asked in batches and without web search, so an import of hundreds of merchants stays quick.
 
     An ordinary merchant is one model question covering all its products; platforms and general stores sell many
     kinds of goods, so each of their products is its own question. Questions go to the model MODEL_BATCH_SIZE at a
@@ -199,7 +214,7 @@ def classify_import_batch(request):
         if cache is not None:
             try:
                 memory = search_classification_by_raw_shop_name(item.shop_name, item_name=item.product_name,
-                                                                embedding_client=cache)
+                                                                max_distance=MERCHANT_MAX_DISTANCE, embedding_client=cache)
             except Exception:
                 pass
         if memory.get("matched"):
@@ -234,7 +249,8 @@ def classify_import_batch(request):
                 result = checked_classification({
                     "shop_name": str(reply.get("shop_name") or question["raw"])[:300],
                     "main_category": str(reply.get("main_category") or ""), "sub_category": str(reply.get("sub_category") or ""),
-                    "detail_category": str(reply.get("detail_category") or "")}, request)
+                    "detail_category": str(reply.get("detail_category") or ""),
+                    "needs_review": str(reply.get("needs_review")).strip().lower() == "true"}, request, fallback=True)
             except Exception:
                 result = {"shop_name": question["raw"], **blank}
             answered.append((question, {**result, "source": "llm"}))
@@ -275,7 +291,7 @@ def remember_import(request):
             continue
         seen.add((raw, product, category))
         try:
-            memory = search_classification_by_raw_shop_name(raw, item_name=product)
+            memory = search_classification_by_raw_shop_name(raw, item_name=product, max_distance=MERCHANT_MAX_DISTANCE)
         except Exception:
             memory = {"matched": False}
         if memory.get("matched") and tuple(str(memory.get(k) or "").strip() for k in fields) == category:

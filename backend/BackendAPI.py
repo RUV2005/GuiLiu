@@ -17,6 +17,7 @@ from decimal import Decimal
 import assets
 import fx_rates
 from assets_api import create_assets_router
+from credit_repayment import RepaymentScheduler
 from bill_import import MAX_BYTES, ImportPreset, ImportService
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -44,6 +45,8 @@ async def lifespan(app):
     app.state.loop_scheduler = mail_loop
     full_mail_import = FullMailImport()
     app.state.full_mail_import = full_mail_import
+    repayments = RepaymentScheduler(DB_FILE)
+    app.state.repayment_scheduler = repayments
     app.state.shutdown_controller = ShutdownController(
         Path(__file__).parent,
         get_setting("services.backend_url", "http://127.0.0.1:8001", "ABK_BACKEND_BASE_URL"),
@@ -55,6 +58,8 @@ async def lifespan(app):
     app.state.initialization = initialization
     def finish():
         fx_rates.history_updater.start()
+        # Credit accounts repay their debt on their payment day; this needs no mailbox or model.
+        repayments.start()
         if get_setting("loop.enabled", True, "ABK_LOOP_ENABLED"):
             mail_loop.start()
         if get_setting("adr.enabled", True, "ABK_ADR_ENABLED"):
@@ -77,6 +82,7 @@ async def lifespan(app):
             log.exception("Could not record the first full mail import")
         mail_loop.stop()
         scheduler.stop()
+        repayments.stop()
         fx_rates.history_updater.stop()
 
 

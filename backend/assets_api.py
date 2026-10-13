@@ -41,11 +41,16 @@ class Calibration(AssetRequest):
 
 
 class CreditRepayment(AssetRequest):
-    from_account_number: int = Field(gt=0)
+    from_account_number: int | None = Field(default=None, gt=0, description="Omitted: only the credit account's debt goes down")
     amount: Decimal = Field(gt=0)
     effective_at: str
     reference: str = Field(default="", max_length=200)
     note: str = Field(default="", max_length=1000)
+
+
+class RepaymentPlan(AssetRequest):
+    payment_day: int = Field(ge=1, le=31, description="Day of the month; a month without it repays on its last day")
+    from_account_number: int | None = Field(default=None, gt=0, description="Omitted: only the credit account's debt goes down")
 
 
 class IncomeRequest(AssetRequest):
@@ -137,6 +142,18 @@ def create_assets_router(db_file):
         data = req.model_dump()
         return respond(lambda: write("account.credit_repayment", {"id": account_number, **data}, idempotency_key,
                                      lambda conn, key: assets.record_credit_repayment(conn, account_number, data, key)))
+
+    @router.put("/accounts/{account_number}/repayment-plan")
+    def repayment_plan(account_number: int, req: RepaymentPlan, idempotency_key: str = Header(min_length=1, max_length=200)):
+        # 每月还款日自动还清欠款；后台定时任务负责到期执行。
+        data = req.model_dump()
+        return respond(lambda: write("account.repayment_plan", {"id": account_number, **data}, idempotency_key,
+                                     lambda conn, key: assets.set_repayment_plan(conn, account_number, data)))
+
+    @router.delete("/accounts/{account_number}/repayment-plan")
+    def remove_repayment_plan(account_number: int, idempotency_key: str = Header(min_length=1, max_length=200)):
+        return respond(lambda: write("account.repayment_plan_delete", {"id": account_number}, idempotency_key,
+                                     lambda conn, key: assets.delete_repayment_plan(conn, account_number)))
 
     @router.post("/income")
     def income(req: IncomeRequest, idempotency_key: str = Header(min_length=1, max_length=200)):

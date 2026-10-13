@@ -1,6 +1,7 @@
-// Settings → Version and updates. The Backend reads the signed latest.json of the newest GitHub release; this panel
-// shows the result, downloads and verifies an update on request, and waits while launch.py switches to it. Data is
-// backed up before the switch and the previous version returns if the new one does not start.
+// Settings → Version and updates, and the sidebar's update entry. The Backend reads the signed latest.json of the newest
+// GitHub release; the panel shows the result, and both the panel and the entry download and verify an update on request
+// and wait while launch.py switches to it. Data is backed up before the switch and the previous version returns if the
+// new one does not start. One controller drives both, so an update keeps reporting on every page.
 import { escapeHtml as e, escapeAttr as a } from './utils.js';
 
 const copy = {
@@ -47,6 +48,19 @@ const copy = {
   stale: ['更新信息已变化，请重新检查。', '更新情報が変わりました。もう一度確認してください。', 'The update information changed; check again.'],
   failed: ['更新失败，请稍后重试。', '更新に失敗しました。後で再試行してください。', 'The update failed. Please retry later.'],
   checkedAt: ['上次检查：{time}', '前回の確認：{time}', 'Last checked: {time}'],
+  // The sidebar entry above the profile block.
+  entryAvailable: ['新版本更新', '新バージョンに更新', 'Update available'],
+  entryTitle: ['新版本 {version} 已发布。点一下自动更新：下载约 {size} MB，备份数据后重启归流，大约半分钟。',
+    '新しいバージョン {version} が公開されました。クリックすると自動で更新します：約 {size} MB をダウンロードし、データをバックアップしてから GUILIU を再起動します（約 30 秒）。',
+    'Version {version} is out. Click to update: it downloads about {size} MB, backs up your data and restarts GUILIU, which takes about half a minute.'],
+  entryFullTitle: ['新版本 {version} 的运行环境有变化，需要下载完整安装包。点一下查看说明。', 'バージョン {version} は完全なパッケージが必要です。クリックすると手順を表示します。',
+    'Version {version} needs the full package. Click for the steps.'],
+  entryDownloading: ['正在下载 {percent}%', 'ダウンロード中 {percent}%', 'Downloading {percent}%'],
+  entryVerifying: ['正在校验…', '確認中…', 'Verifying…'],
+  entryRestarting: ['正在重启…', '再起動中…', 'Restarting…'],
+  entrySlow: ['重启较慢，请稍后刷新', '再起動に時間がかかっています', 'Restart is slow; reload soon'],
+  entryRestart: ['重启完成更新', '再起動して更新', 'Restart to update'],
+  entryRetry: ['更新没成功，点一下重试', '更新に失敗しました。クリックで再試行', 'Update failed; click to retry'],
 };
 export const updateText = (language, key) => copy[key]?.[{ zh: 0, ja: 1, en: 2 }[language] ?? 0] ?? copy.failed[{ zh: 0, ja: 1, en: 2 }[language] ?? 0];
 const fill = (text, values) => Object.entries(values).reduce((value, [key, item]) => value.replaceAll('{' + key + '}', item), text);
@@ -101,6 +115,38 @@ export function updateSettingsView(ctx) {
     '<div aria-busy="' + Boolean(state.loading || state.busy) + '">' + body + '</div></section>';
 }
 
+// The sidebar entry: nothing until a newer version can be installed, then one click updates and it reports progress.
+export function updateEntryView(ctx) {
+  const state = ctx.state.updateSettings, s = state?.status;
+  if (!s?.supported) return '';
+  const task = s.task || {}, text = key => updateText(ctx.language, key);
+  let label, title = '', busy = true;
+  if (state.restarting || task.state === 'restarting') { label = text(state.slow ? 'entrySlow' : 'entryRestarting'); title = text(state.slow ? 'slow' : 'restarting'); }
+  else if (task.state === 'downloading') label = fill(text('entryDownloading'), { percent: Math.min(100, Math.floor(100 * (Number(task.received) || 0) / (Number(task.size) || 1))) });
+  else if (task.state === 'verifying') label = text('entryVerifying');
+  else {
+    busy = false;
+    if (s.pending) { label = text('entryRestart'); title = fill(text('pending'), { version: s.pending }); }
+    else if (!s.available) return '';
+    else if (state.error || task.state === 'failed') { label = text('entryRetry'); title = text(state.error || task.error || 'failed'); }
+    else { label = text('entryAvailable'); title = fill(text(s.compatible === false ? 'entryFullTitle' : 'entryTitle'), { version: s.latest, size: megabytes(s.size) }); }
+  }
+  const mark = '<span class="sidebar-update-mark" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 11.5V4.5M4.75 7.5 8 4.25l3.25 3.25"/></svg></span>';
+  return '<button class="sidebar-update' + (busy ? ' is-busy' : '') + '" type="button" data-update-entry title="' + a(title || label) + '" aria-label="' + a(label) + '"' +
+    (busy || state.busy ? ' disabled' : '') + '>' + mark + '<span class="sidebar-update-label">' + e(label) + '</span></button>';
+}
+
+function patchUpdateEntry(root, ctx) {
+  const host = root?.querySelector('[data-update-entry-host]');
+  if (!host) return;
+  const html = updateEntryView(ctx);
+  if (versions.get(host) === html) return;
+  const focused = host.contains(host.ownerDocument.activeElement);
+  host.innerHTML = html;
+  if (focused) host.querySelector('[data-update-entry]:not(:disabled)')?.focus({ preventScroll: true });
+  versions.set(host, html);
+}
+
 function safeLink(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && url.hostname === 'github.com' ? url.href : ''; } catch { return ''; }
 }
@@ -123,9 +169,10 @@ function patchUpdateSettings(root, ctx) {
 }
 
 export function createUpdateController({ state, api, source, context, root = () => document, reload = () => location.reload(),
-  setTimer = setTimeout, clearTimer = clearTimeout, pollMs = 2000, restartLimitMs = 180000 }) {
+  openSettings = () => { location.hash = '#settings'; }, setTimer = setTimeout, clearTimer = clearTimeout, pollMs = 2000,
+  restartLimitMs = 180000, checkMs = 3600000 }) {
   const scopes = new Map(), mounted = new WeakSet();
-  let epoch = 0, entered = false, timer = null;
+  let epoch = 0, entered = false, timer = null, watching = false;
 
   function activate() {
     const key = source();
@@ -136,7 +183,12 @@ export function createUpdateController({ state, api, source, context, root = () 
     }
     return state.updateSettings;
   }
-  function patch() { if (state.route !== 'settings') return false; activate(); return patchUpdateSettings(root(), context()); }
+  function patch() {
+    activate();
+    const ctx = context();
+    patchUpdateEntry(root(), ctx);
+    return state.route === 'settings' ? patchUpdateSettings(root(), ctx) : false;
+  }
   function schedule(callback, delay = pollMs) { clearTimer(timer); timer = setTimer(() => { timer = null; void callback(); }, delay); }
   async function load(refresh = false) {
     const current = activate(), version = epoch;
@@ -151,7 +203,11 @@ export function createUpdateController({ state, api, source, context, root = () 
     } catch (error) {
       if (version === epoch) current.error = error?.payload?.error || 'network';
     } finally {
-      if (version === epoch) { current.loading = false; patch(); }
+      if (version === epoch) {
+        current.loading = false; patch();
+        // Between updates, look again every checkMs (the Backend asks GitHub at most hourly).
+        if (watching && !timer && !current.restarting) schedule(() => load(false), checkMs);
+      }
     }
   }
   function waitForRestart(current, from) {
@@ -199,11 +255,33 @@ export function createUpdateController({ state, api, source, context, root = () 
       if (version === epoch) { current.busy = false; patch(); }
     }
   }
-  function leave() { epoch += 1; entered = false; clearTimer(timer); timer = null; const current = state.updateSettings; if (current) { current.loading = current.busy = false; } }
+  // The sidebar entry: a pending update restarts, a full-package release opens Settings, anything else starts at once.
+  function act() {
+    const current = activate(), s = current.status;
+    if (!s?.supported || current.busy || current.loading) return;
+    if (s.pending) void restart();
+    else if (s.available && s.compatible === false) openSettings();
+    else if (current.error === 'stale') void load(true);
+    else if (s.available) void start();
+  }
+  // Leaving Settings only forgets the visit; an update in progress keeps reporting in the sidebar.
+  function leave() { entered = false; const current = state.updateSettings; if (current) current.confirming = false; }
+  function stop() { epoch += 1; entered = false; watching = false; clearTimer(timer); timer = null; const current = state.updateSettings; if (current) { current.loading = current.busy = false; } }
+  // Called once the workspace is ready: check now, then every checkMs while the page is open.
+  function watch() { if (watching) return; watching = true; if (!timer) void load(false); }
   function mount() {
-    if (state.route !== 'settings') { leave(); return; }
     activate();
-    const host = root()?.querySelector('[data-update-settings]');
+    const page = root();
+    if (page && !mounted.has(page)) {
+      mounted.add(page);
+      page.addEventListener('click', event => {
+        const button = event.target.closest?.('[data-update-entry]');
+        if (button && !button.disabled) act();
+      });
+    }
+    patch();
+    if (state.route !== 'settings') return;
+    const host = page?.querySelector('[data-update-settings]');
     if (!host) return;
     if (!mounted.has(host)) {
       mounted.add(host);
@@ -221,16 +299,5 @@ export function createUpdateController({ state, api, source, context, root = () 
     if (!entered) { entered = true; void load(false); }
   }
   activate();
-  return { activate, mount, patch, leave, load };
-}
-
-// Once a day the workspace checks quietly and mentions a new version; nothing is downloaded without the user.
-export async function dailyUpdateNotice({ api, notify, message, storage = globalThis.localStorage, now = Date.now }) {
-  const key = 'guiliu-update-checked-at';
-  try { if (now() - Number(storage?.getItem(key) || 0) < 86400000) return; } catch { /* Optional reminder. */ }
-  try {
-    const result = (await api.getUpdateStatus(false))?.result;
-    try { storage?.setItem(key, String(now())); } catch { /* Optional reminder. */ }
-    if (result?.supported && result.available) notify(message(result.latest));
-  } catch { /* Offline: try again on a later visit. */ }
+  return { activate, mount, patch, leave, stop, watch, load, act };
 }
