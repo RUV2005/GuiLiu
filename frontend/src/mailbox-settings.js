@@ -1,6 +1,7 @@
 // Settings → Mailboxes. A mailbox is added or reconnected in a small window that reuses setup's connection panel.
 // A new mailbox is then indexed and searched for banks in the background while the workspace stays usable; when the
 // banks are found the user gets a message, confirms their accounts here, and the mailbox's history is imported.
+import { debtBalance, exceedsLimit } from './assets-model.js';
 import { escapeHtml as e, escapeAttr as a } from './utils.js';
 import { copy as setupCopy } from './initialization/copy.js';
 import { mailboxMarkup, syncMailbox, mailAccount, defaultGmailMethod } from './initialization/mailbox-view.js';
@@ -65,6 +66,9 @@ const copy = {
   skip: ['跳过', 'スキップ', 'Skip'],
   accountName: ['账户名称', '口座名', 'Account name'],
   openingBalance: ['当前余额（可留空，按 0 起算）', '現在の残高（空欄なら 0 から）', 'Current balance (blank starts at 0)'],
+  currentDebt: ['当前欠款（正数，可留空，按 0 起算）', '現在の未払い残高（正の数、空欄なら 0）', 'Amount owed (positive; blank means 0)'],
+  debtInvalid: ['欠款请填写正数金额。', '未払い残高は正の金額で入力してください。', 'Enter the amount owed as a positive number.'],
+  debtOverLimit: ['欠款不能超过信用额度。', '未払い残高は利用限度額を超えられません。', 'The amount owed cannot exceed the credit limit.'],
   creditLimit: ['信用额度', '利用限度額', 'Credit limit'],
   chooseAccount: ['选择账户', '口座を選択', 'Choose an account'],
   noAccount: ['没有币种和类型相符的账户', '通貨と種類が合う口座はありません', 'No account with this currency and type'],
@@ -184,7 +188,7 @@ function confirmDialogMarkup(ctx, state) {
       '<p class="mailbox-settings-note">' + e(text('sender')) + '：' + e(source.mailaddress || '') + ' · ' + e(text('samples', { count: (source.sample_ids || []).length })) + '</p>' +
       '<div class="mailbox-choices">' + radio('create', 'create') + radio('bind', 'bind', !matching.length) + radio('skip', 'skip') + '</div>' +
       (choice.action === 'create' ? '<div class="mailbox-source-fields"><label>' + e(text('accountName')) + '<input name="name-' + id + '" value="' + a(choice.name ?? '') + '" maxlength="100" data-mailbox-field="name" data-mailbox-for="' + id + '"></label>' +
-        '<label>' + e(text('openingBalance')) + '<input name="balance-' + id + '" value="' + a(choice.opening_balance ?? '') + '" inputmode="decimal" data-mailbox-field="opening_balance" data-mailbox-for="' + id + '"></label>' +
+        '<label>' + e(text(type === 'credit' ? 'currentDebt' : 'openingBalance')) + '<input name="balance-' + id + '" value="' + a(choice.opening_balance ?? '') + '" inputmode="decimal" data-mailbox-field="opening_balance" data-mailbox-for="' + id + '"></label>' +
         (type === 'credit' ? '<label>' + e(text('creditLimit')) + '<input name="limit-' + id + '" value="' + a(choice.credit_limit ?? '') + '" inputmode="decimal" data-mailbox-field="credit_limit" data-mailbox-for="' + id + '"></label>' : '') + '</div>' : '') +
       (choice.action === 'bind' ? '<div class="mailbox-source-fields"><label>' + e(text('chooseAccount')) + '<select data-mailbox-field="account_number" data-mailbox-for="' + id + '">' +
         (matching.length ? matching.map(acc => '<option value="' + a(acc.account_number) + '"' + (String(choice.account_number) === String(acc.account_number) ? ' selected' : '') + '>' +
@@ -408,8 +412,14 @@ export function createMailboxSettingsController({ state, api, source, context, r
         const name = String(choice.name || '').trim(), balance = String(choice.opening_balance || '').trim(), limit = String(choice.credit_limit || '').trim();
         if (!name) { current.formError = 'needName'; renderDialog(); return; }
         if (type === 'credit' && !limit) { current.formError = 'needLimit'; renderDialog(); return; }
+        // A credit account takes what is owed and stores it as a negative balance.
+        let opening = balance;
+        if (balance && type === 'credit') {
+          try { opening = debtBalance(balance, sourceRow.currency); } catch { current.formError = 'debtInvalid'; renderDialog(); return; }
+          if (exceedsLimit(opening.replace('-', ''), limit)) { current.formError = 'debtOverLimit'; renderDialog(); return; }
+        }
         confirmations.push({ source_id: sourceRow.source_id, action: 'bind', account: { name, account_type: type, institution: sourceRow.bank_name || '',
-          currency: sourceRow.currency, ...(balance ? { opening_balance: balance } : {}), ...(type === 'credit' ? { credit_limit: limit } : {}) } });
+          currency: sourceRow.currency, ...(opening ? { opening_balance: opening } : {}), ...(type === 'credit' ? { credit_limit: limit } : {}) } });
       } else { current.formError = 'needAccount'; renderDialog(); return; }
     }
     current.busy = true; current.formError = ''; renderDialog();

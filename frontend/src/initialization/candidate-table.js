@@ -2,6 +2,7 @@ import { e, field, select, option } from './fields.js';
 import { setupCurrency } from './accounts.js';
 import { stepPayload } from './model.js';
 import { describeSetupError } from './setup-errors.js';
+import { balanceInput, syncBalanceInput } from './account-table.js';
 
 export function candidateDraft(source) {
   const draft = source.account_draft || {};
@@ -9,7 +10,8 @@ export function candidateDraft(source) {
     action: source.account_number != null || source.suggested_account_number != null ? 'existing' : 'new',
     account_number: String(source.account_number ?? source.suggested_account_number ?? ''),
     name: draft.name ?? '', institution: draft.institution ?? '', account_type: draft.account_type ?? '',
-    currency: setupCurrency(draft.currency), opening_balance: draft.opening_balance ?? '',
+    // A saved credit draft keeps the debt as a negative balance; the form shows what is owed.
+    currency: setupCurrency(draft.currency), opening_balance: draft.account_type === 'credit' && String(draft.opening_balance ?? '').startsWith('-') ? String(draft.opening_balance).slice(1) : draft.opening_balance ?? '',
     credit_limit: draft.credit_limit ?? '', account_ref: source.account_ref ?? '', confirm_duplicate: false };
 }
 
@@ -29,7 +31,7 @@ export function candidateRowMarkup(source, saved, accounts, t) {
           + eligible.map(a => option(a.account_number, `${a.name} · ${setupCurrency(a.currency)}`, String(a.account_number) === String(d.account_number))).join(''))}</div></td>
       ${newCell(select(t('account_type'), 'account_type', option('', t('notFilled'), !d.account_type) + ['bank', 'credit'].map(type => option(type, t(type), type === d.account_type)).join('')), 'account_type')}
       ${newCell(select(t('currency'), 'currency', option('', t('notFilled'), !d.currency) + ['JPY', 'CNY'].map(c => option(c, c, c === d.currency)).join('')), 'currency')}
-      ${newCell(input('opening_balance', `inputmode="decimal" title="${e(t('balanceOptional') + ' ' + t('creditBalanceHint'))}"`), 'balance')}
+      ${newCell(balanceInput(d.opening_balance, d.account_type === 'credit', t), 'balance')}
       ${newCell(`<div data-candidate-credit>${input('credit_limit', 'inputmode="decimal"')}</div>`, 'credit_limit')}
       <td><div data-candidate-ref>${input('account_ref', 'maxlength="80"')}</div></td>
       <td class="setup-candidate-status"><span>${e(t(source.status || 'pending'))}</span>
@@ -78,6 +80,7 @@ export function syncCandidateControls(row, locked) {
     ['[data-candidate-ref]', ['new', 'existing'].includes(action)], ['[data-candidate-credit]', action === 'new' && credit]]) {
     for (const group of row.querySelectorAll(selector)) group.hidden = !visible;
   }
+  syncBalanceInput(row.querySelector('[data-balance-input]'), credit);
   const selected = row.querySelector('[name="selected"]').checked;
   for (const input of row.querySelectorAll('input, select')) input.disabled = locked || Boolean(input.closest('[hidden]')) || (input.name !== 'selected' && !selected);
 }

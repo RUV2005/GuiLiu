@@ -1314,7 +1314,10 @@ class Initialization:
                         "received_at": mail.get("date", "")}
                     attempts_path = self.root / "regex_attempts.json"
                     attempts = read_json(attempts_path, {})
-                    record = attempts.get(msgid, {})
+                    # Every run here is the user's own click (confirm, or "generate rules again"), so each one gets the
+                    # full 3-call budget; the saved feedback from earlier attempts is kept for the model. Without this, a
+                    # budget used up by network or quota failures made every later retry fail at once.
+                    record = {**attempts.get(msgid, {}), "regex_generations": 0}
 
                     def save_attempt(value):
                         attempts[msgid] = dict(value)

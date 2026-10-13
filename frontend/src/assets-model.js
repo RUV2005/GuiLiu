@@ -61,6 +61,14 @@ export function decimalAmount(value, currency, { positive = false, nonnegative =
   return (minor < 0n ? '-' : '') + whole.toString() + (places ? '.' + fraction : '');
 }
 
+// Credit accounts: people enter what they owe; the ledger keeps a debt as a negative balance. A leading minus sign
+// (the old way to type a debt) means the same debt.
+export function debtBalance(value, currency) {
+  const debt = decimalAmount(String(value ?? '').trim().replace(/^-/, ''), currency, { nonnegative: true });
+  return /^0(\.0+)?$/.test(debt) ? debt : '-' + debt;
+}
+export const exceedsLimit = (debt, limit) => limit !== '' && limit != null && Number(debt) > Number(limit);
+
 // Aggregate API decimals without binary rounding in displayed subtotals.
 export function sumAmounts(values, currency) {
   if (values.some((value) => assetNumber(value) === null)) return null;

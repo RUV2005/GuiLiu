@@ -13,7 +13,9 @@ export function setupAmount(value, language, unknown) {
 export function accountTableEditor(account, kind, focus) {
   return { kind, id: String(account.account_number), focus, fields: {
     name: account.name || '', institution: account.institution || '', account_type: account.account_type,
-    credit_limit: account.credit_limit ?? '', confirmed_balance: account.balance ?? '',
+    credit_limit: account.credit_limit ?? '',
+    // A credit account is reconciled by what is owed, not by its (negative) balance.
+    confirmed_balance: account.account_type === 'credit' ? account.outstanding_balance ?? '' : account.balance ?? '',
     note: '',
   } };
 }
@@ -22,6 +24,17 @@ export function accountSourceMarkup(account, sources, receiptEmail, t) {
   const source = accountSourceEmails(account, sources, receiptEmail);
   return source.emails.length ? source.emails.map(email => `<span>${e(email)}</span>`).join('')
     : `<span class="setup-source-unset">${e(t(source.kind === 'bank' ? 'bankSenderPending' : 'receiptSenderPending'))}</span>`;
+}
+
+// New accounts: a credit account asks for what is owed; the label follows the chosen type.
+export function balanceInput(value, credit, t) {
+  return `<input name="opening_balance" value="${e(value)}" inputmode="decimal" aria-label="${e(t(credit ? 'currentDebt' : 'initialBalance'))}" placeholder="${e(t(credit ? 'debtPlaceholder' : 'balancePlaceholder'))}"`
+    + ` data-balance-input data-label-credit="${e(t('currentDebt'))}" data-label-other="${e(t('initialBalance'))}" data-hint-credit="${e(t('debtPlaceholder'))}" data-hint-other="${e(t('balancePlaceholder'))}">`;
+}
+export function syncBalanceInput(input, credit) {
+  if (!input?.dataset?.labelCredit) return;
+  input.setAttribute('aria-label', credit ? input.dataset.labelCredit : input.dataset.labelOther);
+  input.placeholder = credit ? input.dataset.hintCredit : input.dataset.hintOther;
 }
 
 export function accountTableMarkup(accounts, editor, t, language = 'zh', sources = [], receiptEmail = '') {
@@ -39,7 +52,8 @@ export function accountTableMarkup(accounts, editor, t, language = 'zh', sources
       <td>${details ? `<select name="account_type" aria-label="${e(t('account_type'))}">${ACCOUNT_TYPES.map(type => option(type, t(type), type === f.account_type)).join('')}</select>` : cellButton(a, 'update', 'account_type', 'account_type', t(a.account_type))}</td>
       <td>${details ? input('institution', 'institutionLabel', f.institution, 'maxlength="100"') : cellButton(a, 'update', 'institution', 'institutionLabel', a.institution)}</td>
       <td class="setup-account-currency">${e(setupCurrency(a.currency))}</td>
-      <td class="setup-account-amount" ${a.account_type === 'credit' ? `title="${e(t('outstanding') + ': ' + amount(a.outstanding_balance))}"` : ''}>${balance ? input('confirmed_balance', 'confirmedBalance', f.confirmed_balance, `inputmode="decimal" required title="${e(t('creditBalanceHint'))}"`) : cellButton(a, 'calibrate', 'confirmed_balance', 'accountBalance', amount(a.balance))}</td>
+      <td class="setup-account-amount">${balance ? input('confirmed_balance', a.account_type === 'credit' ? 'currentDebt' : 'confirmedBalance', f.confirmed_balance, `inputmode="decimal" required placeholder="${e(t(a.account_type === 'credit' ? 'debtPlaceholder' : 'balancePlaceholder'))}"`)
+        : a.account_type === 'credit' ? cellButton(a, 'calibrate', 'confirmed_balance', 'currentDebt', t('debtShort') + ' ' + amount(a.outstanding_balance)) : cellButton(a, 'calibrate', 'confirmed_balance', 'accountBalance', amount(a.balance))}</td>
       <td class="setup-account-amount">${details ? `<span data-review-credit ${credit ? '' : 'hidden'}>${input('credit_limit', 'credit_limit', f.credit_limit, 'inputmode="decimal"')}</span><span data-review-no-credit ${credit ? 'hidden' : ''}>—</span>` : credit ? cellButton(a, 'update', 'credit_limit', 'credit_limit', amount(a.credit_limit)) : '—'}</td>
       <td class="setup-account-source" data-account-source="${e(a.account_number)}">${accountSourceMarkup(a, sources, receiptEmail, t)}</td>
       <td class="setup-account-row-actions">${active ? `<button type="submit" class="setup-button primary">${e(t('saveShort'))}</button><button type="button" class="setup-button" data-review-action="cancel-account">${e(t('cancel'))}</button>` : ''}</td>
@@ -51,11 +65,11 @@ export function accountTableMarkup(accounts, editor, t, language = 'zh', sources
     <td><select name="account_type" aria-label="${e(t('account_type'))}">${ACCOUNT_TYPES.map(type => option(type, t(type), type === f.account_type)).join('')}</select></td>
     <td>${input('institution', 'institutionLabel', f.institution, 'maxlength="100"')}</td>
     <td><select name="currency" aria-label="${e(t('currency'))}">${['JPY', 'CNY'].map(c => option(c, c, c === f.currency)).join('')}</select></td>
-    <td>${input('opening_balance', 'initialBalance', f.opening_balance, `inputmode="decimal" title="${e(t('balanceOptional') + ' ' + t('creditBalanceHint'))}"`)}</td>
+    <td>${balanceInput(f.opening_balance, f.account_type === 'credit', t)}</td>
     <td><span data-review-credit ${f.account_type === 'credit' ? '' : 'hidden'}>${input('credit_limit', 'credit_limit', f.credit_limit, 'inputmode="decimal"')}</span><span data-review-no-credit ${f.account_type === 'credit' ? 'hidden' : ''}>—</span></td>
     <td>—</td><td class="setup-account-row-actions"><button type="submit" class="setup-button primary">${e(t('saveShort'))}</button><button type="button" class="setup-button" data-review-action="cancel-account">${e(t('cancel'))}</button></td>
     </tr><tr data-review-duplicate hidden><td colspan="8"><label class="setup-check"><input type="checkbox" name="confirm_duplicate" ${f.confirm_duplicate ? 'checked' : ''}>${e(t('separateAccount'))}</label></td></tr>`;
   return `<form data-review-account-form data-review-table-form class="setup-account-table-form"><div class="setup-account-table-scroll" role="region" aria-label="${e(t('accountsTitle'))}" tabindex="0">
-    <table class="setup-account-table"><colgroup>${['name', 'type', 'institution', 'currency', 'amount', 'credit', 'source', 'actions'].map(name => `<col class="setup-account-col-${name}">`).join('')}</colgroup><thead><tr>${['name', 'account_type', 'institution', 'currency', 'accountBalance', 'credit_limit', 'sourceEmail', 'actions'].map(key => `<th scope="col">${e(t(key))}</th>`).join('')}</tr></thead><tbody>${rows}${createRow}${!rows && !creating ? `<tr><td colspan="8">${e(t('noSavedAccounts'))}</td></tr>` : ''}</tbody></table>
+    <table class="setup-account-table"><colgroup>${['name', 'type', 'institution', 'currency', 'amount', 'credit', 'source', 'actions'].map(name => `<col class="setup-account-col-${name}">`).join('')}</colgroup><thead><tr>${['name', 'account_type', 'institution', 'currency', 'balanceOrDebt', 'credit_limit', 'sourceEmail', 'actions'].map(key => `<th scope="col">${e(t(key))}</th>`).join('')}</tr></thead><tbody>${rows}${createRow}${!rows && !creating ? `<tr><td colspan="8">${e(t('noSavedAccounts'))}</td></tr>` : ''}</tbody></table>
     </div></form>`;
 }

@@ -5,6 +5,7 @@ import { canReview } from './accounts.js';
 import { accountTableEditor, accountTableMarkup, accountSourceMarkup, setupAmount } from './account-table.js';
 import { localizeView } from '../language-view.js';
 import { candidateTableMarkup, readCandidateFields, syncCandidateControls, selectedSourcePayload } from './candidate-table.js';
+import { syncBalanceInput } from './account-table.js';
 import { describeSetupError } from './setup-errors.js';
 
 const action = (label, type, id = '', disabled = false) => `<button type="button" class="setup-button" data-review-action="${type}" data-id="${e(id)}" ${disabled ? 'disabled' : ''}>${e(label)}</button>`;
@@ -61,7 +62,7 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
       return `<li><strong>${e(source.bank_name || source.mailaddress)}</strong><span>${e(reason)}${reasons.length > 1 ? e(` (+${reasons.length - 1})`) : ''}</span></li>`;
     }).join('');
     return `<p class="setup-rule-summary-title">${e(t('ruleSummaryTitle').replace('{count}', failing.length))}</p><ul>${items}</ul>
-      <p class="setup-note">${e(t('ruleSummaryHint'))}</p><div class="setup-inline-actions">${action(t('retryRules'), 'retry-rules')}</div>`;
+      <p class="setup-note">${e(t('ruleSummaryHint'))}</p><div class="setup-inline-actions">${action(t('retryRules'), 'retry-rules')}${action(t('skipFailing'), 'skip-failing')}</div>`;
   }
   function sync(state) {
     if (state.confirmationResult && draft.confirmationVersion !== state.confirmationResult.version) {
@@ -128,6 +129,7 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
       edit.querySelector('button[type="submit"]').textContent = t(state.accountPending ? 'retryAccountWrite' : inline ? 'saveShort' : 'saveAccount');
       const credit = edit.querySelector('[data-review-credit]');
       if (credit) { credit.hidden = edit.elements.account_type.value !== 'credit'; credit.querySelector('input').disabled ||= credit.hidden; }
+      syncBalanceInput(edit.querySelector('[data-balance-input]'), edit.elements.account_type?.value === 'credit');
       const noCredit = edit.querySelector('[data-review-no-credit]');
       if (noCredit) noCredit.hidden = !credit.hidden;
       const dup = edit.querySelector('[data-review-duplicate]');
@@ -141,7 +143,7 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
       const type = b.dataset.reviewAction;
       b.disabled = blocked || Boolean(state.accountPending) || (Boolean(state.confirmationPending) && !['retry-confirmation', 'refresh'].includes(type)) || (state.accountEditing && type !== 'cancel-account');
       if (['create', 'update', 'calibrate'].includes(type)) b.disabled ||= state.sourceEditing || !state.accountsLoaded || Boolean(state.accountsError) || Boolean(state.checkError);
-      if (['save-selected', 'save-source'].includes(type)) b.disabled ||= !editable || state.uncertain || !state.accountsLoaded || Boolean(state.accountsError) || Boolean(state.checkError);
+      if (['save-selected', 'save-source', 'skip-failing'].includes(type)) b.disabled ||= !editable || state.uncertain || !state.accountsLoaded || Boolean(state.accountsError) || Boolean(state.checkError);
       if (type === 'save-source') b.disabled ||= !b.closest('[data-review-source]').querySelector('[name="selected"]').checked;
       if (type === 'discard-source') b.disabled ||= !editable;
       if (type === 'retry-rules') b.disabled ||= !editable || state.uncertain || Boolean(state.checkError) || Boolean(state.confirmationPending);
@@ -208,6 +210,20 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
       controller.error(error.message);
     }
   }
+  // Leave the sources whose rules failed out (their mail is not booked automatically) and keep every other choice.
+  async function skipFailing() {
+    if (!local) return;
+    const failing = new Set(controller.state.status.sources.filter(source => source.status === 'rules_review').map(source => source.source_id));
+    const rows = Object.fromEntries([...root.querySelectorAll('[data-review-source]')].map(row => {
+      const fields = readCandidateFields(row);
+      return [row.dataset.reviewSource, failing.has(row.dataset.reviewSource) ? { ...fields, selected: false } : fields];
+    }));
+    try { await controller.submit('account_confirmation', selectedSourcePayload(controller.state.status.sources, rows, controller.state.accounts)); }
+    catch (error) {
+      if (error.sourceId) draft.sources[error.sourceId] = { ...rows[error.sourceId], error: error.message };
+      controller.error(error.message);
+    }
+  }
   function onClick(event) {
     const b = event.target.closest('[data-review-action]');
     if (!b || b.disabled) return;
@@ -221,6 +237,7 @@ export function mountBankReview({ root, controller, t, language = () => 'zh', lo
     if (type === 'discard-source') { delete draft.sources[id]; sourceSignature = ''; controller.editingSources(Object.keys(draft.sources).length > 0); }
     if (type === 'save-source') void saveSource(id);
     if (type === 'save-selected') void saveSelected();
+    if (type === 'skip-failing') void skipFailing();
     if (type === 'retry-confirmation') void (async () => {
       const pending = controller.state.confirmationPending;
       if (!pending) return;

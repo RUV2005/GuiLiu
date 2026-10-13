@@ -1791,6 +1791,9 @@ document.addEventListener("change", (event) => {
   }
   if (target.matches('[data-assets-form="account"] [name="account_type"]')) {
     target.form.querySelector('[data-asset-credit-field]').hidden = target.value !== 'credit';
+    // A new credit account asks for what is owed instead of a balance.
+    target.form.querySelector('[data-asset-balance-label]')?.toggleAttribute('hidden', target.value === 'credit');
+    target.form.querySelector('[data-asset-debt-label]')?.toggleAttribute('hidden', target.value !== 'credit');
     return;
   }
   if (target.matches('[data-finance-colors]')) {

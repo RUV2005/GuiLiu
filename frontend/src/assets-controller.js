@@ -1,5 +1,5 @@
 import { normalizePrimaryCurrency } from './config.js';
-import { assetCurrency, assetDisplayCurrency, assetNumber, decimalAmount, findAssetAccount, historyRange, overviewAssetQuery, operationKey, createAssetState } from './assets-model.js';
+import { assetCurrency, assetDisplayCurrency, assetNumber, decimalAmount, findAssetAccount, historyRange, overviewAssetQuery, operationKey, createAssetState, debtBalance } from './assets-model.js';
 import { patchAssetChanges } from './assets-view.js';
 import { createAssetCache } from './assets-cache.js';
 
@@ -198,14 +198,16 @@ export function createAssetsController({ api, state, context, render, renderOver
           original.id ? findAssetAccount(state, original.id)?.currency : value('currency'), { nonnegative: true }) : null;
         if (original.id) write = (key) => api.updateAccount(original.id, payload, key);
         else {
-          Object.assign(payload, { currency: value('currency'), opening_balance: value('opening_balance') ? decimalAmount(value('opening_balance'), value('currency')) : null,
+          const opening = !value('opening_balance') ? null : payload.account_type === 'credit' ? debtBalance(value('opening_balance'), value('currency')) : decimalAmount(value('opening_balance'), value('currency'));
+          Object.assign(payload, { currency: value('currency'), opening_balance: opening,
             effective_at: dateValue(value('effective_at')) });
           if (value('account_number')) payload.account_number = Number(value('account_number'));
           write = (key) => api.createAccount(payload, key);
         }
       } else if (kind === 'calibrate') {
         const account = findAssetAccount(state, original.id);
-        payload = { confirmed_balance: decimalAmount(value('confirmed_balance'), account.currency), effective_at: dateValue(value('effective_at')), note: value('note') };
+        const confirmed = account.account_type === 'credit' ? debtBalance(value('confirmed_balance'), account.currency) : decimalAmount(value('confirmed_balance'), account.currency);
+        payload = { confirmed_balance: confirmed, effective_at: dateValue(value('effective_at')), note: value('note') };
         write = (key) => api.calibrateAccount(original.id, payload, key);
       } else if (kind === 'income') {
         const account = findAssetAccount(state, value('account_number'));

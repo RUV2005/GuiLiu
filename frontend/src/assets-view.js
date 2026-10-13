@@ -228,11 +228,14 @@ export function assetModalContent(ctx, { modalHeader }) {
       '</span>' + input('credit_limit', account?.credit_limit, 'inputmode="decimal"') + '</label>';
     if (!account) fields += field(ctx, 'assetAccountNumber', input('account_number', '', 'type="number" min="1" step="1" placeholder="' + a(text(ctx, 'assetAutoNumber')) + '"')) +
       field(ctx, 'assetCurrency', '<select name="currency">' + ['JPY', 'CNY'].map((code) => option(code, code, assetCurrency(ctx.state.settings.contextCurrency))).join('') + '</select>') +
-      field(ctx, 'assetOpening', input('opening_balance', '', 'inputmode="decimal" placeholder="' + a(text(ctx, 'assetOptionalOpening')) + '"')) + field(ctx, 'assetEffective', input('effective_at', japanInputTime(), 'type="datetime-local" step="1" required'));
+      '<label class="field"><span data-asset-balance-label>' + e(text(ctx, 'assetOpening')) + '</span><span data-asset-debt-label hidden>' + e(text(ctx, 'assetOpeningDebt')) + '</span>' +
+        input('opening_balance', '', 'inputmode="decimal" placeholder="' + a(text(ctx, 'assetOptionalOpening')) + '"') + '</label>' + field(ctx, 'assetEffective', input('effective_at', japanInputTime(), 'type="datetime-local" step="1" required'));
   } else if (kind === 'calibrate') {
-    hint = text(ctx, 'assetCalibrationHint');
+    // A credit account is reconciled by what is owed (a positive amount), not by its negative balance.
+    const credit = account?.account_type === 'credit';
+    hint = text(ctx, credit ? 'assetCalibrationDebtHint' : 'assetCalibrationHint');
     fields = '<p class="full">' + e(account?.name || '') + ' · ' + e(account?.currency || '') + '</p>' +
-      field(ctx, 'assetConfirmed', input('confirmed_balance', '', 'inputmode="decimal" required autofocus')) +
+      field(ctx, credit ? 'assetConfirmedDebt' : 'assetConfirmed', input('confirmed_balance', credit ? account?.outstanding_balance ?? '' : '', 'inputmode="decimal" required autofocus')) +
       field(ctx, 'assetEffective', input('effective_at', japanInputTime(), 'type="datetime-local" step="1" required')) +
       field(ctx, 'assetNote', input('note', '', 'maxlength="1000"'));
   } else if (kind === 'income') {
