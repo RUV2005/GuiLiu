@@ -29,16 +29,16 @@
 .import-tools { flex: 1; justify-content: flex-end; }
 .import-tools input { width: min(100%, 210px); }
 .import-table-scroll { max-height: 520px; overflow: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); scrollbar-width: thin; container-type: inline-size; }
-.import-table { width: 100%; min-width: 1320px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.import-table { width: 100%; min-width: 660px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
 .import-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); padding: 14px 10px; color: var(--muted); font: 500 11px/1.4 var(--font-ui); border-bottom: 1px solid var(--line); text-align: left; }
 .import-table td { padding: 14px 10px; color: var(--ink-soft); font-size: 12px; line-height: 1.7; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
-.import-table th:nth-child(1) { width: 38px; }
-.import-table th:nth-child(2) { width: 44px; }
-.import-table th:nth-child(3) { width: 142px; }
-.import-table th:nth-child(4) { width: 155px; }
-.import-table th:nth-child(5) { width: 120px; }
+/* Select · date · merchant/product (takes the rest) · amount · category · note · details */
+.import-table th:nth-child(1) { width: 32px; }
+.import-table th:nth-child(2) { width: 82px; }
+.import-table th:nth-child(4) { width: 100px; }
+.import-table th:nth-child(5) { width: 112px; }
 .import-table th:nth-child(6) { width: 168px; }
-.import-table th:nth-child(11) { width: 150px; }
+.import-table th:nth-child(7) { width: 52px; }
 .import-table .import-line { color: var(--quiet); font-family: var(--font-numeric); }
 .import-cell-price { font-family: var(--font-numeric); font-variant-numeric: tabular-nums; }
 .import-cell-isotime time span { display: block; white-space: nowrap; }
@@ -117,3 +117,61 @@
 .import-progress span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .import-classified { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; font-variant-numeric: tabular-nums; }
 .import-classified.has-open { color: var(--ink-soft); }
+
+/* Upload: two numbered steps, one start button; the rest waits under Advanced. */
+.import-intro { max-width: 760px; margin: -12px 0 24px; color: var(--ink-soft); font-size: 14px; line-height: 1.8; }
+.import-steps { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 20px; align-items: start; }
+.import-step { display: grid; gap: 12px; min-width: 0; }
+.import-step h2 { display: flex; align-items: center; gap: 10px; font: 500 15px/1.5 var(--font-ui); color: var(--ink); }
+.import-step h2 span { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line-strong); font: 500 12px/1 var(--font-numeric); color: var(--ink-soft); }
+.import-file-copy h3 { font: 500 17px/1.5 var(--font-ui); overflow-wrap: anywhere; }
+.import-drop.has-file h3 { font-size: 15px; }
+.import-page .import-account-select { width: 100%; padding: 11px 12px; font-size: 14px; }
+.import-start { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin: 24px 0 8px; padding-top: 20px; border-top: 1px solid var(--line); }
+.import-start .import-privacy { max-width: 620px; flex: 1 1 280px; margin: 0; }
+.import-advanced { margin: 18px 0 8px; }
+.import-advanced > summary { width: fit-content; color: var(--ink-soft); font-size: 13px; line-height: 1.7; cursor: pointer; }
+.import-advanced[open] > summary { margin-bottom: 8px; }
+.import-advanced .button-row { margin-top: 10px; }
+/* Review: one sentence, then one card per group. */
+.import-sentence { margin: 22px 0 6px; color: var(--ink); font-size: 15px; line-height: 1.8; overflow-wrap: anywhere; }
+.import-nothing { margin: 6px 0; color: var(--ink-soft); font-size: 14px; line-height: 1.8; }
+.import-account-hint { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin: 16px 0 4px; padding: 14px 16px; border-left: 2px solid var(--warning); background: var(--surface-2); }
+.import-account-hint p { flex: 1 1 360px; margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.import-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 18px 0 8px; }
+.import-group { display: grid; gap: 4px; align-content: start; min-width: 0; padding: 14px 16px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); color: var(--ink-soft); font: inherit; cursor: pointer; }
+.import-group:hover:not(:disabled) { background: var(--surface-hover); }
+.import-group.is-active { border-color: var(--ink-soft); background: var(--surface-2); color: var(--ink); }
+.import-group strong { font: 400 26px/1.2 var(--font-numeric); color: var(--ink); }
+.import-group span { font-size: 13px; font-weight: 500; }
+.import-group small { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.import-group.is-attention strong { color: var(--warning); }
+.import-toolbar h2 { font: 500 15px/1.5 var(--font-ui); color: var(--ink); }
+.import-toolbar > div > p { color: var(--muted); font-size: 12px; line-height: 1.7; margin-top: 2px; }
+.import-cell-merchant strong, .import-cell-merchant .import-cell-trigger { display: block; color: var(--ink); font-weight: 500; }
+.import-cell-merchant small { display: block; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.import-cell-isotime time small { display: block; color: var(--quiet); font-size: 11px; }
+.import-table .import-cell-trigger.is-missing { color: var(--warning); text-decoration: underline dotted; text-underline-offset: 3px; }
+.import-cell-note .import-row-state { margin: 0; line-height: 1.6; }
+.import-cell-note .import-row-state + .import-row-state { margin-top: 2px; }
+.import-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 14px; align-items: end; padding: 4px 0; }
+.import-editor label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; min-width: 0; }
+.import-editor input { width: 100%; }
+.import-edit-row td { background: var(--surface-1); }
+.import-footer { position: sticky; bottom: 0; z-index: 2; background: var(--canvas); }
+.import-footer.is-confirming { border-top-color: var(--ink-soft); }
+.import-page .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 860px) {
+  .import-steps { grid-template-columns: minmax(0, 1fr); }
+  .import-start { flex-direction: column; align-items: stretch; }
+  .import-upload-submit { justify-content: stretch; }
+  .import-upload-submit .button { width: 100%; }
+}
+@media (max-width: 640px) {
+  .import-toolbar { flex-direction: column; align-items: stretch; }
+  .import-tools { justify-content: stretch; }
+  .import-tools :is(input, select) { flex: 1 1 100%; width: 100%; }
+  .import-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .import-footer { flex-direction: column; align-items: stretch; }
+  .import-footer .button-row .button { flex: 1; }
+}

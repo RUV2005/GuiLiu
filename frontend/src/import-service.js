@@ -1,13 +1,16 @@
 import { createImportState, validateImportFile, validateJob, validateRows, processingImport, editableImport,
-  IMPORT_PAGE_SIZE, planImportBatches, importOperationKey, correctionValues, canEditImportRow, presetTemplate, parseImportPreset } from './import-model.js';
+  IMPORT_PAGE_SIZE, planImportBatches, importOperationKey, correctionValues, canEditImportRow, presetTemplate, parseImportPreset,
+  groupCounts, defaultGroup, activeGroup, canImportRow, selectImportRow, rowDone, paymentQuery } from './import-model.js';
 
 export function createImportService({ api, state, source, changed = () => {}, afterCommit = async () => {},
-  storage = globalThis.sessionStorage, visible = () => !globalThis.document?.hidden,
+  storage = globalThis.sessionStorage, preferences = globalThis.localStorage, visible = () => !globalThis.document?.hidden,
   uuid = importOperationKey, schedule = setTimeout, unschedule = clearTimeout }) {
   let timer = null, statusFlight = null, setupFlight = null, rowEpoch = 0;
   const reads = new Set();
   const current = () => state.importData;
   const key = scope => 'abk-import-task-v1:' + encodeURIComponent(scope);
+  // The account used last time is offered again (a per-browser convenience).
+  const accountKey = scope => 'guiliu-import-account-v1:' + encodeURIComponent(scope);
   const live = s => current() === s && source() === s.scope;
   const paint = s => { if (live(s)) changed(); };
   const message = error => error?.message || String(error);
@@ -25,6 +28,7 @@ export function createImportService({ api, state, source, changed = () => {}, af
     for (const read of reads) read.abort();
     reads.clear(); rowEpoch++; statusFlight = null; setupFlight = null;
     const s = state.importData = createImportState(); s.scope = scope;
+    try { s.form.account_number = preferences?.getItem(accountKey(scope)) || ''; } catch { /* Optional. */ }
     try {
       const saved = JSON.parse(storage?.getItem(key(scope)) || 'null');
       if (/^[a-f0-9]{32}$/.test(saved?.id || '')) {
@@ -56,23 +60,31 @@ export function createImportService({ api, state, source, changed = () => {}, af
     }
     persist(s); return true;
   }
+  // Show the group that needs the user; move on when the shown group has emptied (for example after importing).
+  function ensureFilter(s) {
+    const counts = groupCounts(s.job), group = activeGroup(s);
+    if (s.payment !== null && !s.job.payment_methods?.[group]?.[s.payment]) s.payment = null;
+    if (s.filter && (!group || counts[group])) return;
+    s.filter = 'group:' + defaultGroup(s.job); s.rows = []; s.query = ''; s.payment = null;
+  }
   async function loadRows(append = false) {
     const s = ensureScope();
     if (!s.job || processingImport(s.job.state) || s.job.state === 'mapping_required') return false;
-    const id = s.job.import_id, revision = s.job.revision, filter = s.filter;
+    if (!append) ensureFilter(s);
+    const id = s.job.import_id, revision = s.job.revision, filter = s.filter, payment = paymentQuery(s.payment);
     if (append && (s.rowsLoading || s.nextOffset === null)) return false;
     const offset = append ? s.nextOffset : 0, token = ++rowEpoch;
     const keepCount = append ? 0 : s.rows.length;
     s.rowsLoading = true; paint(s);
     try {
-      const data = validateRows((await read(s, options => api.getImportRows(id, { offset, limit: IMPORT_PAGE_SIZE, status: filter }, options))).result, offset);
+      const data = validateRows((await read(s, options => api.getImportRows(id, { offset, limit: IMPORT_PAGE_SIZE, status: filter, payment }, options))).result, offset);
       while (!append && data.next_offset !== null && data.rows.length < keepCount) {
         if (!live(s) || token !== rowEpoch || s.job?.revision !== revision) return false;
         const next = data.next_offset;
-        const page = validateRows((await read(s, options => api.getImportRows(id, { offset: next, limit: IMPORT_PAGE_SIZE, status: filter }, options))).result, next);
+        const page = validateRows((await read(s, options => api.getImportRows(id, { offset: next, limit: IMPORT_PAGE_SIZE, status: filter, payment }, options))).result, next);
         data.rows.push(...page.rows); data.next_offset = page.next_offset; data.total = page.total;
       }
-      if (!live(s) || token !== rowEpoch || s.filter !== filter || s.job?.revision !== revision) return false;
+      if (!live(s) || token !== rowEpoch || s.filter !== filter || paymentQuery(s.payment) !== payment || s.job?.revision !== revision) return false;
       s.rows = append ? [...new Map([...s.rows, ...data.rows].map(row => [row.row_id, row])).values()] : data.rows;
       for (const row of data.rows) s.rowCache.set(row.row_id, row);
       s.total = data.total; s.nextOffset = data.next_offset; s.rowsRevision = revision;
@@ -115,7 +127,10 @@ export function createImportService({ api, state, source, changed = () => {}, af
       const [presets, accounts] = results;
       if (presets.status === 'fulfilled' && Array.isArray(presets.value.result)) s.presets = presets.value.result;
       else s.setupError = presets.status === 'rejected' ? 'GET /imports/presets: ' + message(presets.reason) : 'invalidResponse';
-      if (accounts.status === 'fulfilled' && Array.isArray(accounts.value.result?.items)) s.accounts = accounts.value.result.items;
+      if (accounts.status === 'fulfilled' && Array.isArray(accounts.value.result?.items)) {
+        s.accounts = accounts.value.result.items;
+        if (!s.accounts.some(account => String(account.account_number) === String(s.form.account_number))) s.form.account_number = '';
+      }
       else s.setupError = accounts.status === 'rejected' ? 'GET /DB/accounts: ' + message(accounts.reason) : 'invalidResponse';
       s.setupLoaded = !s.setupError; s.setupLoading = false; paint(s); return s.setupLoaded;
     })();
@@ -137,6 +152,7 @@ export function createImportService({ api, state, source, changed = () => {}, af
     try {
       const job = validateJob((await api.createImportPreview(body)).result);
       if (!live(s)) return false;
+      try { preferences?.setItem(accountKey(s.scope), String(s.form.account_number)); } catch { /* Optional. */ }
       s.job = null; s.resumeId = ''; s.rows = []; s.rowCache.clear(); s.choices.clear(); s.distinct.clear(); s.externalIncome.clear(); s.expanded.clear();
       s.rowsRevision = null; s.filter = ''; s.query = ''; s.confirming = false; s.conflict = false; s.mappingFor = '';
       applyJob(s, job, true); return true;
@@ -267,6 +283,42 @@ export function createImportService({ api, state, source, changed = () => {}, af
     s.mappingFor = ''; s.filter = ''; s.query = ''; s.completedBatches = 0;
     persist(s); paint(s); return true;
   }
+  // Select every row of a group that can be imported, across all pages, not only the rows loaded so far.
+  async function selectGroup(group) {
+    const s = ensureScope();
+    if (!s.job || !editableImport(s.job) || s.busy || s.pendingCommit || s.editor || s.rowsRevision !== s.job.revision) return false;
+    const id = s.job.import_id, revision = s.job.revision, payment = paymentQuery(s.payment);
+    s.busy = 'selecting'; paint(s);
+    try {
+      let offset = 0;
+      for (;;) {
+        const page = validateRows((await read(s, options => api.getImportRows(id, { offset, limit: 100, status: 'group:' + group, payment }, options))).result, offset);
+        if (!live(s) || s.job?.revision !== revision) return false;
+        for (const row of page.rows) {
+          s.rowCache.set(row.row_id, row);
+          if (!rowDone(row) && canImportRow(row, s.distinct.has(row.row_id), s.externalIncome.has(row.row_id))) selectImportRow({ ...s, busy: '' }, row, 'import');
+        }
+        if (page.next_offset === null) break;
+        offset = page.next_offset;
+      }
+      return true;
+    } catch (error) { if (live(s)) s.error = message(error); return false; }
+    finally { if (live(s)) { s.busy = ''; paint(s); } }
+  }
+  // Read the same file again into another account (the preview said its rows were imported there before).
+  async function switchAccount(number) {
+    const s = ensureScope();
+    if (s.busy || s.pendingCommit || s.editor || !s.accounts.some(account => String(account.account_number) === String(number))) return false;
+    const file = s.file;
+    s.form.account_number = String(number);
+    if (!file) {
+      s.job = null; s.resumeId = ''; s.rows = []; s.rowCache.clear(); s.choices.clear(); s.filter = ''; s.notice = 'chooseFileAgain';
+      persist(s); paint(s); return false;
+    }
+    newFile(file);
+    s.form.account_number = String(number);
+    return upload();
+  }
   function syncActive() {
     const s = ensureScope();
     if (!active()) { unschedule(timer); timer = null; return; }
@@ -274,5 +326,5 @@ export function createImportService({ api, state, source, changed = () => {}, af
     if (!timer && !statusFlight && (s.job || s.resumeId)) arm(200);
   }
   function dispose() { unschedule(timer); for (const read of reads) read.abort(); reads.clear(); }
-  return { ensureScope, setup, poll, loadRows, upload, selectPreset, savePreset, saveEditor, commit, newFile, syncActive, dispose };
+  return { ensureScope, setup, poll, loadRows, upload, selectPreset, savePreset, saveEditor, commit, newFile, syncActive, dispose, selectGroup, switchAccount };
 }

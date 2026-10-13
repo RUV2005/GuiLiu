@@ -407,8 +407,8 @@ def create_import_router(db_path, agent_url):
 
     @router.get("/{import_id}/rows")
     def rows(import_id: str, status: str | None = None, offset: int = Query(0, ge=0),
-             limit: int = Query(50, ge=1, le=100)):
-        return respond(lambda: service().rows(import_id, status, offset, limit))
+             limit: int = Query(50, ge=1, le=100), payment: str | None = Query(None, max_length=200)):
+        return respond(lambda: service().rows(import_id, status, offset, limit, payment))
 
     @router.put("/{import_id}/mapping")
     def mapping(import_id: str, request: MappingRequest):

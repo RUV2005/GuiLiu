@@ -28,6 +28,7 @@ export function createImportState() {
     busy: '', rowsLoading: false, error: '', notice: '', conflict: false, confirming: false,
     pendingCommit: null, completedBatches: 0, pollingError: '',
     presetOpen: false, presetText: '', presetDirty: false, savePreset: false, mappingFor: '',
+    advancedOpen: false, payment: null,
   };
 }
 export function validateImportFile(file) {
@@ -115,6 +116,55 @@ export function parseImportPreset(value) {
   try { preset = JSON.parse(value); } catch { throw new Error('presetInvalid'); }
   if (!preset || typeof preset !== 'object' || Array.isArray(preset) || !/^[a-z][a-z0-9_]{0,63}$/.test(preset.preset_id || '') || !preset.columns || typeof preset.columns !== 'object' || Array.isArray(preset.columns)) throw new Error('presetInvalid');
   return preset;
+}
+// The review page groups rows the way people think about them; the Backend counts and filters by the same groups.
+export const IMPORT_GROUPS = ['ready', 'attention', 'existing', 'excluded', 'done'];
+export function groupCounts(job) {
+  if (job?.groups) return Object.fromEntries(IMPORT_GROUPS.map(group => [group, Number(job.groups[group] || 0)]));
+  // A task saved before groups existed: estimate them from the row states.
+  const c = job?.counts || {}, n = key => Number(c[key] || 0);
+  return { ready: n('new'), attention: n('needs_review') + n('suspected_duplicate') + n('invalid') + n('failed'),
+    existing: n('duplicate'), excluded: n('excluded'), done: n('imported') + n('skipped') };
+}
+// Open the group that needs the user first: rows to import, then rows to look at, then whatever the file holds.
+export function defaultGroup(job) {
+  const counts = groupCounts(job);
+  return ['ready', 'attention', 'existing', 'excluded', 'done'].find(group => counts[group]) || 'ready';
+}
+export const activeGroup = state => state.filter.startsWith('group:') ? state.filter.slice(6) : '';
+// Payment methods in a group, most rows first ('' is a row without one).
+export function paymentMethods(job, group) {
+  return Object.entries(job?.payment_methods?.[group] || {}).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
+}
+export const paymentQuery = payment => payment === null ? null : payment === '' ? '__none__' : payment;
+const ISSUE_NOTES = { refund_requires_review: 'noteRefund', payment_requires_review: 'notePayment', account_currency_mismatch: 'account_currency_mismatch',
+  conflicting_rows_with_same_identity: 'conflicting_rows_with_same_identity', row_processing_failed: 'row_processing_failed' };
+// Why a row is where it is, in plain words (keys of the import copy; vars fill them in).
+export function rowReasons(row, account) {
+  const state = rowStatus(row), issues = row.issues || [], candidates = row.duplicate_candidates || [], out = [];
+  const has = reason => candidates.some(candidate => (candidate.reasons || []).includes(reason));
+  if (state === 'imported') return [{ key: 'noteImported' }];
+  if (state === 'skipped') return [{ key: 'noteSkipped' }];
+  if (row.commit_error || state === 'failed') out.push({ key: 'noteFailed' });
+  if (state === 'duplicate') {
+    const elsewhere = candidates.find(candidate => (candidate.reasons || []).includes('imported_to_other_account'));
+    if (elsewhere) return [{ key: 'noteInOtherAccount', vars: { account: elsewhere.AccountNumber } }];
+    return [{ key: has('same_import_identity') ? 'noteImportedBefore' : 'noteDuplicate' }];
+  }
+  if (state === 'excluded') return [{ key: issues.includes('not_a_successful_payment') ? 'noteNotSuccessful' : 'noteNotSpending',
+    vars: { type: row.normalized?.transaction_type || '' } }];
+  const conflict = candidates.find(candidate => (candidate.reasons || []).includes('import_identity_conflict'));
+  if (conflict) out.push(conflict.AccountNumber != null && String(conflict.AccountNumber) !== String(account)
+    ? { key: 'noteOtherAccount', vars: { account: conflict.AccountNumber } } : { key: 'noteChanged' });
+  if (has('previous_import_was_deleted') || has('previous_import_was_deleted_or_changed_kind')) out.push({ key: 'noteDeleted' });
+  if (state === 'suspected_duplicate') out.push({ key: 'noteMaybeDuplicate' });
+  for (const issue of issues) if (ISSUE_NOTES[issue]) out.push({ key: ISSUE_NOTES[issue] });
+  if (needsIncomeConfirmation(row) && ['new', 'suspected_duplicate'].includes(row.status)) out.push({ key: 'noteIncomeConfirm' });
+  // Only rows that can still be edited are asked for a category.
+  if (missingClassification(row) && !rowDone(row) && ['new', 'suspected_duplicate'].includes(row.status)) out.push({ key: 'noteNeedsCategory' });
+  if (state === 'invalid') out.push({ key: 'noteInvalid' });
+  if (!out.length && state === 'new') out.push({ key: 'noteReady' });
+  return out;
 }
 export function validateJob(job, id) {
   if (!job || !/^[a-f0-9]{32}$/.test(job.import_id || '') || (id && id !== job.import_id) || !Number.isInteger(job.revision) || !Number.isInteger(job.total) || job.total < 0 || !job.state) throw new Error('invalidResponse');

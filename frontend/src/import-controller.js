@@ -82,6 +82,17 @@ export function createImportController({ state, api, source, afterCommit, openIn
       const id = target.dataset.importDetails;
       s.expanded.has(id) ? s.expanded.delete(id) : s.expanded.add(id); paint(); return;
     }
+    if (target.dataset.importGroup) {
+      s.filter = 'group:' + target.dataset.importGroup; s.rows = []; s.query = ''; s.payment = null; s.confirming = false; paint();
+      return void service.loadRows();
+    }
+    if (action === 'select-all-ready') return void service.selectGroup('ready');
+    if (action === 'import-all') return void (async () => {
+      if (!await service.selectGroup('ready')) return;
+      try { buildImportChoices(s); s.confirming = true; s.error = ''; } catch (e) { s.error = e.message; }
+      paint();
+    })();
+    if (action === 'switch-account') return void service.switchAccount(target.dataset.account);
     if (action === 'choose') return doc.querySelector('[data-import-file]').click();
     if (action === 'upload') return void service.upload();
     if (action === 'setup') return void service.setup(true);
@@ -149,6 +160,12 @@ export function createImportController({ state, api, source, afterCommit, openIn
     }
     if (target.hasAttribute('data-import-preset-load')) { s.presetDirty = false; await service.selectPreset(target.value); return; }
     if (target.hasAttribute('data-import-save-preset')) { s.savePreset = target.checked; return; }
+    if (target.hasAttribute('data-import-select-all')) {
+      if (target.checked) await service.selectGroup('ready');
+      else { s.choices.clear(); s.confirming = false; }
+      paint(); return;
+    }
+    if (target.hasAttribute('data-import-payment')) { s.payment = target.value === '*' ? null : target.value; s.rows = []; s.query = ''; s.choices.clear(); s.confirming = false; await service.loadRows(); return; }
     if (target.hasAttribute('data-import-filter')) { s.filter = target.value; s.rows = []; s.query = ''; s.confirming = false; await service.loadRows(); return; }
     if (target.hasAttribute('data-import-distinct')) {
       const id = target.dataset.importDistinct;
@@ -164,7 +181,8 @@ export function createImportController({ state, api, source, afterCommit, openIn
     }
     if (target.hasAttribute('data-import-select')) {
       const row = s.rowCache.get(target.dataset.importSelect);
-      selectImportRow(s,row,target.checked ? (canImportRow(row,s.distinct.has(row.row_id),s.externalIncome.has(row.row_id)) ? 'import' : 'skip') : '');
+      // A tick means "import this row"; rows left unticked are simply not imported.
+      selectImportRow(s,row,target.checked && canImportRow(row,s.distinct.has(row.row_id),s.externalIncome.has(row.row_id)) ? 'import' : '');
       paint(); return;
     }
     if (target.hasAttribute('data-import-decision')) { selectImportRow(s,s.rowCache.get(target.dataset.importDecision),target.value); paint(); }
@@ -190,6 +208,8 @@ export function createImportController({ state, api, source, afterCommit, openIn
     if (event.target.closest?.('[data-import-drop]')) acceptFiles([...event.dataTransfer.files]);
   });
   doc.addEventListener('visibilitychange',()=>service.syncActive());
+  // Repaints must not fold "Advanced" back up while the user works in it.
+  doc.addEventListener('toggle',event=>{ if (event.target.matches?.('[data-import-advanced]')) current().advancedOpen = event.target.open; },true);
   return {
     patch:()=>{ service.syncActive(); return state.route === 'import' && Boolean(doc.querySelector('[data-import-page]')); },
     mount:()=>{ service.syncActive(); paint(); },

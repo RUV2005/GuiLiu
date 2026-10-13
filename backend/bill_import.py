@@ -403,11 +403,15 @@ def find_duplicate_transaction(conn, row, window_minutes=1):
         compatible = (assets.currency(existing["CurrencyTypeNumber"]) == assets.currency(data["CurrencyTypeNumber"])
                       and Decimal(str(existing["price"])) == Decimal(data["price"])
                       and abs((datetime.fromisoformat(assets.timestamp(existing["ISOtime"])) -
-                               datetime.fromisoformat(assets.timestamp(data["isotime"]))).total_seconds()) <= 60
-                      and str(existing.get("AccountNumber")) == str(data["AccountNumber"]))
+                               datetime.fromisoformat(assets.timestamp(data["isotime"]))).total_seconds()) <= 60)
+        # The same row booked from this file into another account (a file split by payment method) is already in the
+        # ledger: skip it and say where it is. Only a changed amount or time needs the user.
+        reasons = ["same_import_identity"] if compatible else ["import_identity_conflict"]
+        if compatible and str(existing.get("AccountNumber")) != str(data["AccountNumber"]):
+            reasons.append("imported_to_other_account")
         return ("duplicate" if compatible else "needs_review"), [{
             "DealingNumber": number, "shop_name": existing["ShopName"], "price": existing["price"],
-            "time": existing["ISOtime"], "reasons": ["same_import_identity" if compatible else "import_identity_conflict"]}]
+            "time": existing["ISOtime"], "AccountNumber": existing.get("AccountNumber"), "reasons": reasons}]
     when = datetime.fromisoformat(assets.timestamp(data["isotime"]))
     window = timedelta(minutes=window_minutes)
     # Compare endpoints to avoid floating-point subtraction at the 60-second boundary.
@@ -450,12 +454,14 @@ def find_duplicate_income(conn, row, window_minutes=1):
         if existing is None:
             return "needs_review", [{"income_id": income_id, "reasons": ["previous_import_was_deleted_or_changed_kind"]}]
         compatible = (existing["Currency"] == code and existing["Amount"] == amount
-                      and existing["AccountNumber"] == data["AccountNumber"]
                       and abs((datetime.fromisoformat(existing["EffectiveAt"]) -
                                datetime.fromisoformat(assets.timestamp(data["isotime"]))).total_seconds()) <= 60)
+        reasons = ["same_import_identity"] if compatible else ["import_identity_conflict"]
+        if compatible and existing["AccountNumber"] != data["AccountNumber"]:
+            reasons.append("imported_to_other_account")
         return ("duplicate" if compatible else "needs_review"), [{"income_id": income_id,
             "shop_name": existing["SourceName"], "price": assets.major_amount(existing["Amount"], existing["Currency"]),
-            "time": existing["EffectiveAt"], "reasons": ["same_import_identity" if compatible else "import_identity_conflict"]}]
+            "time": existing["EffectiveAt"], "AccountNumber": existing["AccountNumber"], "reasons": reasons}]
     candidates = []
     when = datetime.fromisoformat(assets.timestamp(data["isotime"]))
     window = timedelta(minutes=window_minutes)
@@ -751,6 +757,39 @@ class ImportService:
                    and row.get("commit_status") != "imported")
         return expense, expense and not (n.get("main_category") and n.get("sub_category"))
 
+    # What the review page shows: rows ready to import, rows that need a look, rows already in the ledger (skipped on
+    # their own), rows that are not bookkeeping (transfers, fund income...), and rows already handled.
+    GROUPS = ("ready", "attention", "existing", "excluded", "done")
+
+    @classmethod
+    def row_group(cls, row):
+        state = row.get("commit_status") or row["status"]
+        if state in {"imported", "skipped"}:
+            return "done"
+        if state == "duplicate":
+            return "existing"
+        if state == "excluded":
+            return "excluded"
+        income_check = row.get("income_confirmation_required") or "confirm_external_income_required" in (row.get("issues") or [])
+        if state == "new" and not cls._open_expense(row)[1] and not income_check:
+            return "ready"
+        return "attention"
+
+    @staticmethod
+    def previous_accounts(job):
+        # Rows imported before into another account: usually the wrong account was chosen for this file.
+        counts = Counter()
+        for row in job["rows"]:
+            if (row.get("commit_status") or row["status"]) != "needs_review":
+                continue
+            for candidate in row.get("duplicate_candidates") or []:
+                account = candidate.get("AccountNumber")
+                if "import_identity_conflict" in candidate.get("reasons", []) and account is not None \
+                        and str(account) != str(job.get("account_number")):
+                    counts[str(account)] += 1
+                    break
+        return dict(counts)
+
     def summary(self, job):
         rows = job["rows"]
         # Where the categories of expenses still to import came from: memory (or the ShopName table), the model, the
@@ -760,6 +799,11 @@ class ImportService:
                           if expense and not unclassified)
         return {**{k: v for k, v in job.items() if k not in {"rows", "source_path", "commits", "classification_cache"}},
                 "counts": dict(Counter(row.get("commit_status") or row["status"] for row in rows)), "total": len(rows),
+                "groups": {group: 0 for group in self.GROUPS} | dict(Counter(self.row_group(row) for row in rows)),
+                # Payment methods per group, so a file mixing (say) Huabei and a bank card can be imported one by one.
+                "payment_methods": {group: dict(Counter(row["normalized"].get("payment_method") or "" for row in rows
+                                                        if self.row_group(row) == group)) for group in self.GROUPS},
+                "previous_accounts": self.previous_accounts(job),
                 "classification": {"memory": sources["classification_memory"] + sources["shop_name_table"],
                                    "model": sources["llm"], "user": sources["user_confirmed"],
                                    "open": sum(unclassified for _, unclassified in flags)}}
@@ -767,11 +811,16 @@ class ImportService:
     def get(self, ident):
         return self.summary(self.load(ident))
 
-    def rows(self, ident, status=None, offset=0, limit=50):
+    def rows(self, ident, status=None, offset=0, limit=50, payment=None):
         rows = self.load(ident)["rows"]
+        if payment is not None:
+            payment = "" if payment == "__none__" else payment
+            rows = [row for row in rows if (row["normalized"].get("payment_method") or "") == payment]
         if status == "unclassified":
             # Not a row status: expenses still lacking a category, the preview's "to classify" filter.
             rows = [row for row in rows if self._open_expense(row)[1]]
+        elif status and status.startswith("group:"):
+            rows = [row for row in rows if self.row_group(row) == status[6:]]
         elif status:
             rows = [row for row in rows if (row.get("commit_status") or row["status"]) == status]
         return {"rows": rows[offset:offset + limit], "total": len(rows), "offset": offset,
