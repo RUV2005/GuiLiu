@@ -13,6 +13,7 @@ const copy = [
   ['useAgent', '使用模型辅助分类', 'モデルによる分類を利用', 'Use model-assisted classification'],
   ['timezone', '原始时间所在时区', '元データのタイムゾーン', 'Source timezone'],
   ['defaultCurrency', '默认币种', '既定の通貨', 'Default currency'],
+  ['accountCurrency', '跟随账户币种', '口座の通貨', "Account's currency"],
   ['sheet', '工作表（可选）', 'シート（任意）', 'Worksheet (optional)'],
   ['upload', '上传并生成预览', 'アップロードしてプレビュー', 'Upload for preview'],
   ['previewOnly', '上传只生成预览。确认选中的记录后才会写入账本。一个文件绑定一个账户；多种付款账户请拆分导入。', 'アップロードはプレビューのみです。選択した明細を確定するまで記帳されません。1 ファイルにつき 1 口座を指定してください。', 'Uploading creates a preview only. Nothing is recorded until you confirm selected rows. Use one account per file; split statements for multiple accounts.'],

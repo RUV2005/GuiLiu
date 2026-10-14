@@ -3,7 +3,7 @@ const TTL = 24 * 60 * 60 * 1000;
 const LIMIT = 1500000;
 const amount = value => value === null || typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value);
 const account = row => row && Number.isInteger(row.account_number) && typeof row.name === 'string' &&
-  ['JPY', 'CNY'].includes(row.currency) && amount(row.balance);
+  ['JPY', 'CNY', 'USD'].includes(row.currency) && amount(row.balance);
 const accounts = rows => Array.isArray(rows) && rows.every(account);
 
 function valid(kind, data) {

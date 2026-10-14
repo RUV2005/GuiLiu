@@ -117,7 +117,7 @@ class BankSource(BaseModel):
     is_bank: bool
     bank_name: str = Field(default="", max_length=100)
     account_type: Literal["bank", "credit", "unknown"] = "unknown"
-    currency: Literal["JPY", "CNY"] | None = None
+    currency: Literal["JPY", "CNY", "USD"] | None = None
     account_ref: str = Field(default="", max_length=80)
     identity_quote: str = Field(default="", max_length=500)
     mail_type: Literal["debit", "repayment", "credit", "notice", "other"] = "other"

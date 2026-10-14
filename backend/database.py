@@ -5,7 +5,7 @@ import json
 import time
 from contextlib import closing
 from mail_ids import with_aliases
-from datetime import datetime
+from datetime import datetime, timezone
 import assets
 from pyasn1_modules.rfc2459 import SubjectAltName
 
@@ -38,8 +38,34 @@ class DBmanage :
             if columns and "msgid" not in columns:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN msgid TEXT DEFAULT NULL")
 
+    @staticmethod
+    def ensure_adr_user_changes(conn):
+        # Item lines the user deleted, or the version an edit replaced (ReplacedBy names the edited line).
+        # Automatic enrichment reads this so later evidence does not add them back.
+        conn.execute("""CREATE TABLE IF NOT EXISTS ADRUserRemoved (
+            ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            DealingNumber INTEGER NOT NULL,
+            ProductName TEXT NOT NULL DEFAULT '',
+            Quantity REAL DEFAULT NULL,
+            price REAL NOT NULL,
+            Reason TEXT NOT NULL CHECK (Reason IN ('deleted', 'edited')),
+            ReplacedBy INTEGER DEFAULT NULL,
+            RemovedAt TEXT NOT NULL)""")
+        conn.execute("CREATE INDEX IF NOT EXISTS ADRUserRemoved_Dealing ON ADRUserRemoved (DealingNumber)")
+
+    @staticmethod
+    def remember_adr_removal(conn, DealingNumber, SubDealingNumber, reason, replaced_by=None):
+        row = conn.execute("SELECT ProductName, Quantity, price FROM ADRresults WHERE DealingNumber = ? AND SubDealingNumber = ?",
+                           (DealingNumber, SubDealingNumber)).fetchone()
+        if row is not None and row[2] is not None:
+            conn.execute("""INSERT INTO ADRUserRemoved (DealingNumber, ProductName, Quantity, price, Reason, ReplacedBy, RemovedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""", (DealingNumber, row[0] or "", row[1], row[2], reason, replaced_by,
+                                                  datetime.now(timezone.utc).isoformat(timespec="seconds")))
+        return row
+
     def _ensure_runtime_schema(self, conn):
         self.ensure_mail_source_columns(conn)
+        self.ensure_adr_user_changes(conn)
         assets.ensure_asset_schema(conn)
         cursor = conn.cursor()
         try:
@@ -1196,6 +1222,12 @@ class DBmanage :
         cursor = conn.cursor()
 
         try:
+            old = conn.execute("SELECT ProductName, Quantity, price FROM ADRresults WHERE DealingNumber = ? AND SubDealingNumber = ?",
+                               (DealingNumber, SubDealingNumber)).fetchone()
+            num = lambda value: None if value in (None, "") else float(value)
+            if old is not None and (str(old[0] or "").strip(), num(old[1]), num(old[2])) != (str(ProductName or "").strip(), num(Quantity), num(price)):
+                # The version the user replaced must not come back as a new line from later evidence.
+                self.remember_adr_removal(conn, DealingNumber, SubDealingNumber, "edited", SubDealingNumber)
             cursor.execute(
                 """
                 UPDATE ADRresults
@@ -1247,6 +1279,8 @@ class DBmanage :
         cursor = conn.cursor()
 
         try:
+            # Remember the line so automatic enrichment does not add it back; same transaction as the delete.
+            self.remember_adr_removal(conn, DealingNumber, SubDealingNumber, "deleted")
             cursor.execute(
                 """
                 DELETE FROM ADRresults

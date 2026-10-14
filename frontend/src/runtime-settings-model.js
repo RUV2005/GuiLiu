@@ -5,7 +5,8 @@ export const RUNTIME_FIELDS = [
   field('models.mail_classification', 'model', ['邮件分类', 'メール分類', 'Mail classification']),
   field('models.dealing_classification', 'model', ['账单分类', '取引分類', 'Transaction classification']),
   field('models.ocr_intent', 'model', ['OCR 意图判断', 'OCR 意図判定', 'OCR intent']),
-  field('models.ocr', 'text', ['图片 OCR', '画像 OCR', 'Image OCR']),
+  // Free text for the backend (any OCR model), shown as the same dropdown as the other models.
+  field('models.ocr', 'text', ['图片 OCR', '画像 OCR', 'Image OCR'], { choices: true }),
   field('models.adr', 'model', ['ADR', 'ADR', 'ADR']),
   field('agent.max_context_tokens', 'integer', ['上下文预算', 'コンテキスト予算', 'Context budget'], { nullable: true }),
   field('agent.max_output_tokens', 'integer', ['通用输出预算', '共通出力予算', 'Default output budget']),

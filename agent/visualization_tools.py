@@ -10,7 +10,7 @@ from visualization_models import Chart
 
 
 DATASET_VIEWS = {"transaction_rows", "expense_summary", "daily_expenses", "category_expenses"}
-CURRENCIES = {"100": "CNY", "101": "JPY", "CNY": "CNY", "RMB": "CNY", "JPY": "JPY"}
+CURRENCIES = {"100": "CNY", "101": "JPY", "102": "USD", "CNY": "CNY", "RMB": "CNY", "JPY": "JPY", "USD": "USD"}
 
 
 def tool_error(error):
@@ -44,10 +44,10 @@ def register_transaction_dataset(pairs, view, currency, query, source_count, war
     known = {code(bill) for bill, _ in pairs} - {None}
     chosen = CURRENCIES.get(str(currency).upper()) if currency is not None else None
     if currency is not None and chosen is None:
-        raise VisualizationError("INVALID_CURRENCY", "currency must be JPY or CNY", "currency")
+        raise VisualizationError("INVALID_CURRENCY", "currency must be JPY, CNY or USD", "currency")
     if chosen is None:
         if len(known) != 1:
-            raise VisualizationError("CURRENCY_REQUIRED", "Specify JPY or CNY for mixed or empty results", "currency")
+            raise VisualizationError("CURRENCY_REQUIRED", "Specify JPY, CNY or USD for mixed or empty results", "currency")
         chosen = next(iter(known))
     entries, excluded, unknown = [], 0, 0
     for bill, _ in pairs:

@@ -116,7 +116,7 @@
 .plans-empty h2 { font: 500 24px/1.5 var(--font-editorial); }
 .plans-empty p { color: var(--muted); font-size: 14px; }
 .plan-notice { border-left: 2px solid var(--ink-soft); background: var(--surface-hover); padding: 12px 16px; font: 400 13px/1.8 var(--font-ui); overflow-wrap: anywhere; }
-.plan-dialog { width: min(700px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); margin: auto; padding: 28px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-1); box-shadow: var(--shadow); overflow: auto; overscroll-behavior: contain; }
+.plan-dialog { width: min(700px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); margin: auto; padding: 28px; border: 1px solid var(--float-border); border-radius: var(--dialog-radius); color: var(--ink); background: var(--float-bg); box-shadow: var(--float-shadow); overflow: auto; overscroll-behavior: contain; }
 .plan-dialog:not([open]) { display: none; }
 .plan-dialog[open] { animation: plan-dialog-enter 280ms cubic-bezier(.2,.8,.2,1) both; }
 .plan-dialog::backdrop { background: #0008; }

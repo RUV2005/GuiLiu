@@ -102,6 +102,8 @@ def apply_bank_action(conn, msgid, account_number, mail_type, fields, decision, 
 
 GMAIL_API_ID = re.compile(r"[0-9a-f]{12,20}")
 TWIN_WINDOW = timedelta(minutes=3)
+# A receipt's printed time and the bank's debit time for one purchase are minutes apart at most.
+RECEIPT_WINDOW = timedelta(minutes=10)
 
 
 def mail_connection(msgid):
@@ -203,6 +205,62 @@ class BankMailProcessor:
             except ValueError:
                 continue
         return None
+
+    def _receipt_bill(self, conn, msgid, fields, code):
+        """The bill a receipt (a photo or a payment screenshot, msgid "ocr:…") recorded for this debit before the bank
+        mail arrived: same currency and amount, within ten minutes, with no account yet or this account, and not
+        already taken by another bank mail. Returns (DealingNumber, AccountNumber) of the only such bill, else None:
+        two candidates are left alone rather than guessed."""
+        try:
+            when = datetime.fromisoformat(assets.timestamp(fields["time"]))
+            amount = float(str(fields["amount"]))
+        except (KeyError, ValueError, assets.AssetError):
+            return None
+        rows = conn.execute("""SELECT DealingNumber, ISOtime, AccountNumber FROM DealingData
+            WHERE msgid LIKE 'ocr:%' AND CurrencyTypeNumber=? AND ABS(price - ?) <= 0.01000001
+            AND (AccountNumber IS NULL OR AccountNumber='' OR AccountNumber=?)""",
+            (assets.currency_number(code), amount, self.account_number)).fetchall()
+        mine = ["bank-mail:" + value for value in with_aliases(msgid)]
+        found = []
+        for number, iso, account in rows:
+            try:
+                near = abs(datetime.fromisoformat(assets.timestamp(iso)) - when) <= RECEIPT_WINDOW
+            except assets.AssetError:
+                continue
+            # Taken by another bank mail: that one was this receipt's debit, so this mail is a second purchase.
+            taken = conn.execute("""SELECT 1 FROM AssetOperation WHERE Kind='bank_mail.receipt'
+                AND json_extract(ResultJSON, '$.DealingNumber')=? AND OperationID NOT IN (%s) LIMIT 1""" % ",".join("?" * len(mine)),
+                (number, *mine)).fetchone()
+            if near and not taken:
+                found.append((number, account))
+        return found[0] if len(found) == 1 else None
+
+    def _settle_receipt(self, msgid, fields, code):
+        """Bank debit after its receipt: the receipt's bill already holds the purchase (often with its item lines), so
+        the debit lands there instead of a second bill. A bill with no account gets this account and its balance
+        change; one already on this account only records that this mail is accounted for. One transaction, keyed
+        by the mail, so a retry or the mail under its other Gmail ID changes nothing more."""
+        with closing(sqlite3.connect(self.db.DBname, timeout=10)) as conn:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                found = self._receipt_bill(conn, msgid, fields, code)
+                if found is None:
+                    return None
+                number, account = found
+
+                def settle(key):
+                    if account not in (None, ""):
+                        return {"DealingNumber": number, "merged": False}
+                    before = assets.read_dealing(conn, number)
+                    conn.execute("UPDATE DealingData SET AccountNumber=? WHERE DealingNumber=?", (self.account_number, number))
+                    sync = assets.apply_dealing_change(conn, before, assets.read_dealing(conn, number), key)
+                    return {"DealingNumber": number, "merged": True, "balance_sync": sync}
+
+                source = {"msgid": msgid, "dealing_number": number, "amount": str(fields["amount"]), "currency": code,
+                          "time": str(fields["time"]), "account_number": self.account_number}
+                result = assets.run_operation(conn, "bank-mail:" + msgid, "bank_mail.receipt", source, settle)
+                conn.execute("INSERT INTO DoneList (MsgID) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM DoneList WHERE MsgID=?)", (msgid, msgid))
+        return result
 
     def _done(self, msgid):
         # DBmanage's legacy writer swallows SQLite errors; this path must not.
@@ -323,7 +381,7 @@ class BankMailProcessor:
             fields = normalize_fields(captures, code)
             record.pop("proposal", None)
         if kind == "debit":
-            if fields["currency"] != code or code not in {"JPY", "CNY"}:
+            if fields["currency"] != code or code not in assets.CURRENCY_NUMBERS:
                 raise ValueError("Debit currency needs confirmed settlement before using the existing billing flow")
             twin = self._posted_another_way(msgid, fields)
             if twin is not None:
@@ -331,6 +389,14 @@ class BankMailProcessor:
                 record.update(status="already_recorded", twin=twin, retry_at=0, attempts=0)
                 self._update(msgid, record)
                 print(f"Bank mail {msgid}: already posted as #{twin} from the other Gmail connection")
+                return None
+            receipt = self._settle_receipt(msgid, fields, code)
+            if receipt is not None:
+                record.update(status="receipt_merged" if receipt.get("merged") else "already_recorded",
+                              receipt=receipt["DealingNumber"], retry_at=0, attempts=0)
+                self._update(msgid, record)
+                print(f"Bank mail {msgid}: debit belongs to receipt bill #{receipt['DealingNumber']}"
+                      + (" (account added)" if receipt.get("merged") else ""))
                 return None
             record.update(status="debit", retry_at=0, attempts=0)
             self._update(msgid, record)

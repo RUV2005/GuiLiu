@@ -34,20 +34,34 @@ def timestamp(value):
         raise AssetError("Invalid timestamp; use ISO 8601 with a timezone") from None
 
 
+# Currency codes stored in DealingData/ADRresults/Account; 0 and 1 are old CNY codes still found in data.
+CURRENCY_NUMBERS = {"JPY": 101, "CNY": 100, "USD": 102}
+# Amounts are stored as integers in the smallest unit people use: yen, fen, cents.
+MINOR_UNITS = {"JPY": 1, "CNY": 100, "USD": 100}
+# The first digit of an account number tells its currency.
+ACCOUNT_PREFIXES = {"JPY": "1", "CNY": "2", "USD": "3"}
+
+
 def currency(value):
     code = str(value).strip().upper()
     if code in {"JPY", "101"}:
         return "JPY"
     if code in {"CNY", "RMB", "100", "0", "1"}:
         return "CNY"
-    raise AssetError("Supported currencies: JPY (101), CNY/RMB (100)")
+    if code in {"USD", "102"}:
+        return "USD"
+    raise AssetError("Supported currencies: JPY (101), CNY/RMB (100), USD (102)")
+
+
+def currency_number(value):
+    return CURRENCY_NUMBERS[currency(value)]
 
 
 def minor_amount(value, code):
     # 库内金额使用整数：人民币以分计，日元以元计；超出币种精度直接报错，不悄悄舍入。
     try:
         number = Decimal(str(value))
-        scaled = number * (100 if currency(code) == "CNY" else 1)
+        scaled = number * MINOR_UNITS[currency(code)]
         if not scaled.is_finite() or scaled != scaled.to_integral_value():
             raise AssetError("Amount has unsupported fractional digits")
         if abs(scaled) > 9_000_000_000_000_000:
@@ -63,8 +77,8 @@ def major_amount(value, code):
     # API 返回原单位的十进制字符串；未知余额保留 None，不能转换成零余额。
     if value is None:
         return None
-    amount = Decimal(value) / (100 if currency(code) == "CNY" else 1)
-    return format(amount, ".2f" if currency(code) == "CNY" else ".0f")
+    unit = MINOR_UNITS[currency(code)]
+    return format(Decimal(value) / unit, ".2f" if unit == 100 else ".0f")
 
 
 class RegularAccount:
@@ -139,7 +153,7 @@ def ensure_asset_schema(conn):
         DealingNumber INTEGER,
         IncomeID INTEGER,
         ChangeAmount INTEGER NOT NULL,
-        Currency TEXT NOT NULL CHECK(Currency IN ('JPY','CNY')),
+        Currency TEXT NOT NULL CHECK(Currency IN ('JPY','CNY','USD')),
         ChangeType TEXT NOT NULL,
         EffectiveAt TEXT NOT NULL,
         RecordedAt TEXT NOT NULL,
@@ -160,12 +174,14 @@ def ensure_asset_schema(conn):
         AccountNumber INTEGER NOT NULL,
         SourceName TEXT NOT NULL DEFAULT '',
         Amount INTEGER NOT NULL CHECK(Amount > 0),
-        Currency TEXT NOT NULL CHECK(Currency IN ('JPY','CNY')),
+        Currency TEXT NOT NULL CHECK(Currency IN ('JPY','CNY','USD')),
         EffectiveAt TEXT NOT NULL,
         Note TEXT NOT NULL DEFAULT '',
         SourceJSON TEXT NOT NULL DEFAULT '{}',
         FOREIGN KEY(AccountNumber) REFERENCES Account(AccountNumber))""")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_income_data_time ON IncomeData(AccountNumber, EffectiveAt, IncomeID)")
+    for table in ("AccountChange", "IncomeData"):
+        _allow_usd(conn, table)
     # 信用账户的每月自动还款：还款日、可选的还款账户；只处理设置之后的还款日，每月一次。
     conn.execute("""CREATE TABLE IF NOT EXISTS CreditRepaymentPlan (
         AccountNumber INTEGER PRIMARY KEY,
@@ -195,6 +211,41 @@ def ensure_asset_schema(conn):
         updated = conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='IncomeData'", (last_income_id,))
         if not updated.rowcount:
             conn.execute("INSERT INTO sqlite_sequence(name,seq) VALUES('IncomeData',?)", (last_income_id,))
+
+
+def _allow_usd(conn, table):
+    """Tables made before USD carry CHECK(Currency IN ('JPY','CNY')), which SQLite cannot alter. Rebuild such a
+    table once under the same definition with USD allowed: same columns, rows, IDs, indexes and AUTOINCREMENT
+    position, in the caller's transaction. A table that already allows USD is left alone."""
+    old_check = "CHECK(Currency IN ('JPY','CNY'))"
+    definition = lambda: (conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() or [""])[0]
+    if old_check not in definition():
+        return
+    # One savepoint: the old table stays as it was unless every step succeeds. Read again inside it, since another
+    # connection may have rebuilt the table first.
+    conn.execute("SAVEPOINT usd_migration")
+    try:
+        sql = definition()
+        if old_check in sql:
+            columns = ", ".join('"' + item[1] + '"' for item in conn.execute(f"PRAGMA table_info({table})"))
+            indexes = [item[0] for item in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL", (table,))]
+            sequence = conn.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
+            staging = table + "_usd_migration"
+            conn.execute(f"DROP TABLE IF EXISTS {staging}")
+            conn.execute(sql.replace(old_check, "CHECK(Currency IN ('JPY','CNY','USD'))").replace(table, staging, 1))
+            conn.execute(f"INSERT INTO {staging} ({columns}) SELECT {columns} FROM {table}")
+            conn.execute(f"DROP TABLE {table}")
+            conn.execute(f"ALTER TABLE {staging} RENAME TO {table}")
+            for index in indexes:
+                conn.execute(index)
+            if sequence:
+                conn.execute("UPDATE sqlite_sequence SET seq=MAX(seq, ?) WHERE name=?", (sequence[0], table))
+        conn.execute("RELEASE usd_migration")
+    except Exception:
+        conn.execute("ROLLBACK TO usd_migration")
+        conn.execute("RELEASE usd_migration")
+        raise
 
 
 def operation_result(conn, operation_id, kind, payload):
@@ -294,7 +345,7 @@ def account_output(conn, account, now=None):
         (account["AccountNumber"], utc_now())).fetchone()
     result = {"account_number": account["AccountNumber"], "name": account["AccountName"],
             "account_type": account["AccountType"], "institution": account["Institution"],
-            "currency": code, "currency_code": 100 if code == "CNY" else 101,
+            "currency": code, "currency_code": CURRENCY_NUMBERS[code],
             "balance": major_amount(balance, code), "balance_minor": balance,
             "balance_as_of": utc_now(), "baseline_at": anchor[0] if anchor else None,
             "balance_status": "ready" if balance is not None else "needs_opening_balance"}
@@ -309,11 +360,11 @@ def list_accounts(conn):
 
 
 def allocate_account_number(conn, code, requested=None):
-    prefix = "1" if currency(code) == "JPY" else "2"
+    prefix = ACCOUNT_PREFIXES[currency(code)]
     if requested is not None:
         number = int(requested)
         if number <= 0 or not str(number).startswith(prefix):
-            raise AssetError("Account number must start with 1 for JPY or 2 for CNY")
+            raise AssetError("Account number must start with 1 for JPY, 2 for CNY or 3 for USD")
         return number
 
     # Reserve legacy references too, so an unregistered account is not reused.
@@ -344,7 +395,7 @@ def create_account(conn, data, operation_id):
     try:
         cursor = conn.execute("""INSERT INTO Account(AccountNumber,AccountName,Value,AccountType,CurrencyType,Institution,CreditLimit)
             VALUES (?,?,?,?,?,?,?)""", (account_number, data["name"], balance,
-            data["account_type"], 100 if code == "CNY" else 101, data.get("institution", ""), limit))
+            data["account_type"], CURRENCY_NUMBERS[code], data.get("institution", ""), limit))
     except sqlite3.IntegrityError:
         raise AssetError("Account number already exists", 409) from None
     account_number = cursor.lastrowid

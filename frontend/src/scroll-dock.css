@@ -2,8 +2,8 @@
 .scroll-dock-hint[hidden] { display: none; }
 .scroll-dock-hint {
   position: fixed; z-index: 46; max-width: min(220px, calc(100vw - 16px)); padding: 7px 12px;
-  color: var(--ink); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 6px;
-  box-shadow: var(--shadow); font: 500 13px/1.5 var(--font-ui); overflow-wrap: anywhere; pointer-events: none;
+  color: var(--ink); background: var(--float-bg); border: 1px solid var(--float-border); border-radius: 8px;
+  box-shadow: var(--float-shadow); font: 500 13px/1.5 var(--font-ui); overflow-wrap: anywhere; pointer-events: none;
 }
 /* The permanent rail owns its gutter on every page, including the Agent canvas. */
 .app-shell > .main-workspace { padding-left: 76px; }
@@ -61,8 +61,8 @@
 @keyframes dock-agent-orbit { from { transform: rotate(29.5deg); } to { transform: rotate(389.5deg); } }
 .scroll-dock-popover {
   position: fixed; z-index: 45; display: flex; flex-direction: column; width: 320px; min-width: 0;
-  padding: 16px; border: 1px solid var(--line-strong); border-radius: 8px;
-  background: var(--surface-2); box-shadow: var(--shadow); overflow: auto;
+  padding: 16px; border: 1px solid var(--float-border); border-radius: 14px;
+  background: var(--float-bg); box-shadow: var(--float-shadow); overflow: auto;
   transition: left var(--motion-sidebar) var(--motion-ease), top var(--motion-sidebar) var(--motion-ease);
 }
 .scroll-dock-popover > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex: none; }
@@ -71,7 +71,8 @@
 .scroll-dock-content { display: grid; gap: 6px; min-height: 0; min-width: 0; overflow-y: auto; }
 .scroll-dock-content .global-search-wrap { display: block; }
 .scroll-dock-content .global-search-wrap > .icon { top: 10px; }
-.scroll-dock-content .search-popover { position: static; margin-top: 10px; box-shadow: none; }
+/* Inside the dock panel the results are a plain list on the panel's own surface, not a second box. */
+.scroll-dock-content .search-popover { position: static; margin-top: 8px; padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
 .scroll-dock-popover.is-agent { padding: 0; border-radius: 29px; overflow: hidden; }
 .scroll-dock-popover.is-agent > header { display: none; }
 .scroll-dock-popover.is-agent > .scroll-dock-content { flex: 1; display: grid; overflow: hidden; }

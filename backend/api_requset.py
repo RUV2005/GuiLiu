@@ -238,6 +238,8 @@ def _guess_ocr_currency(ocr_text: str):
         return "JPY"
     if "CNY" in text or "RMB" in text or "\u5143" in original or "\u652f\u4ed8\u5b9d" in original or "\u5fae\u4fe1" in original:
         return "CNY"
+    if "USD" in text or "$" in original or "\uff04" in original or "\u30c9\u30eb" in original or "\u7f8e\u5143" in original:
+        return "USD"
     return "unknown"
 
 

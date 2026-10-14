@@ -33,6 +33,10 @@
   --finance-red: #b33d4d;
   --focus-color: #62788e;
   --shadow: 0 12px 36px rgba(32, 42, 54, .1);
+  --float-bg: #ffffff;
+  --float-border: rgb(15 23 42 / 10%);
+  --float-shadow: 0 14px 36px rgb(15 23 42 / 13%), 0 2px 6px rgb(15 23 42 / 6%);
+  --float-hover: #eef1f5;
   /* Agent canvas water palette (light): ink-led, then the same cool hues as the dark set, deep enough for white. */
   --chart-series-1: #2b3644;
   --chart-series-2: #1f87a6;
@@ -85,6 +89,8 @@
 :root[data-theme="light"] .settings-page { --settings-card: #ffffff; --settings-card-ring: rgb(15 23 42 / 7%); --settings-card-shadow: 0 1px 2px rgb(15 23 42 / 4%); --settings-bar: #ffffff; }
 /* Agent prompts and tasks: white cards with a faint edge, as in Settings. */
 :root[data-theme="light"] .information-workspace { --information-card: #ffffff; --information-card-ring: rgb(15 23 42 / 7%); }
+/* Transactions filter card: white with a faint edge, like the Settings cards. */
+:root[data-theme="light"] .filter-panel.filter-card { --filter-card: #ffffff; --filter-card-ring: rgb(15 23 42 / 7%); --filter-card-shadow: 0 1px 2px rgb(15 23 42 / 4%); }
 :root[data-theme="light"] .settings-page .settings-form > .settings-save { box-shadow: 0 0 0 1px var(--settings-card-ring), 0 10px 28px rgb(15 23 42 / 12%); }
 :root[data-theme="light"] .modal-backdrop { background: rgba(38, 45, 56, .3); }
 :root[data-theme="light"] .category-icon-backdrop { background: rgba(38, 45, 56, .18); }

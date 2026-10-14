@@ -47,16 +47,49 @@ export function transactionIndex(deals, rates) {
     shop: String(deal.ShopName || '').toLowerCase(),
     mainCategory: String(deal.MainCategory || '').toLowerCase(),
     subCategory: String(deal.SubCategory || '').toLowerCase(),
+    account: transactionAccount(deal),
   }));
 }
 
-export function filterTransactions(index, filters, sort) {
-  const queries = ['id', 'shop', 'mainCategory', 'subCategory'].map((key) => [key, String(filters[key] || '').trim().toLowerCase()]);
-  const start = filters.startDate ? startOfDay(filters.startDate)?.getTime() : null;
-  const end = filters.endDate ? endOfDay(filters.endDate)?.getTime() : null;
+// The account filter value of a bill: its account number, or 'none' for a bill not assigned to any account.
+export const transactionAccount = deal => deal.AccountNumber == null || deal.AccountNumber === '' ? 'none' : String(deal.AccountNumber);
+
+// Periods of the filter bar. A preset is worked out from today each time, so "this month" stays this month.
+export const TRANSACTION_PERIODS = ['this-month', 'last-month', 'last-3-months', 'this-year', 'custom'];
+
+export function transactionPeriodRange(filters, now = new Date()) {
+  const period = filters.period || '';
+  const day = (year, month, date) => new Date(year, month, date);
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+  const presets = {
+    'this-month': [day(y, m, 1), now], 'last-month': [day(y, m - 1, 1), day(y, m, 0)],
+    'last-3-months': [day(y, m - 3, d + 1), now], 'this-year': [day(y, 0, 1), now],
+  };
+  if (presets[period]) return { start: startOfDay(presets[period][0]), end: endOfDay(presets[period][1]) };
+  // Custom (or dates set without a period, as before the period switch existed).
+  if (period === 'custom' || (!period && (filters.startDate || filters.endDate))) {
+    return { start: filters.startDate ? startOfDay(filters.startDate) : null, end: filters.endDate ? endOfDay(filters.endDate) : null };
+  }
+  return { start: null, end: null };
+}
+
+// The conditions in effect, one per kind (a period with its dates counts once); the search box is one of them.
+export function activeTransactionFilters(filters) {
+  const range = transactionPeriodRange(filters);
+  return [['shop', filters.shop], ['period', range.start || range.end ? 'on' : ''],
+    ['account', filters.account], ['mainCategory', filters.mainCategory], ['subCategory', filters.subCategory]]
+    .filter(([, value]) => String(value || '').trim()).map(([key]) => key);
+}
+
+export function filterTransactions(index, filters, sort, now = new Date()) {
+  const queries = ['shop', 'mainCategory', 'subCategory'].map((key) => [key, String(filters[key] || '').trim().toLowerCase()]);
+  const range = transactionPeriodRange(filters, now);
+  const start = range.start?.getTime() ?? null, end = range.end?.getTime() ?? null;
   const direction = sort.direction === 'asc' ? 1 : -1;
   const field = sort.field === 'amount' ? 'amount' : 'time';
+  const account = String(filters.account || '');
   return index.filter((row) => queries.every(([key, query]) => !query || row[key].includes(query)) &&
+    (!account || row.account === account) &&
     (start == null || (row.time !== null && row.time >= start)) &&
     (end == null || (row.time !== null && row.time <= end)))
     .sort((left, right) => direction * ((left[field] || 0) - (right[field] || 0)))

@@ -8,13 +8,14 @@ export function transactionConversion(value, currency, primaryCurrency, rates = 
   const to = currencyName(normalizePrimaryCurrency(primaryCurrency));
   if (value == null || String(value).trim() === '' || !Number.isFinite(amount)) return null;
   if (from === to) return { amount, from, to, rate: 1, fallback: false };
-  if (!['JPY', 'CNY'].includes(from)) return null;
-  const supplied = [rates?.RMB, rates?.CNY].map(Number).find(rate => Number.isFinite(rate) && rate > 0);
-  const cnyToJpy = supplied ?? DEFAULT_RATES.CNY;
-  const rate = from === 'CNY' ? cnyToJpy : 1 / cnyToJpy;
+  if (!['JPY', 'CNY', 'USD'].includes(from) || !['JPY', 'CNY'].includes(to)) return null;
+  // Every rate is yen per unit; a missing quote falls back to the reference rate and says so.
+  const quote = code => code === 'JPY' ? 1 : [code === 'CNY' ? rates?.RMB : null, rates?.[code]].map(Number).find(rate => Number.isFinite(rate) && rate > 0);
+  const toYen = code => quote(code) ?? DEFAULT_RATES[code];
+  const rate = toYen(from) / toYen(to);
   const converted = amount * rate;
   return Number.isFinite(converted)
-    ? { amount: converted, from, to, rate, fallback: supplied == null || rates?.source === 'fallback' }
+    ? { amount: converted, from, to, rate, fallback: quote(from) == null || quote(to) == null || rates?.source === 'fallback' }
     : null;
 }
 

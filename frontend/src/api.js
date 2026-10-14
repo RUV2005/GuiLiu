@@ -258,6 +258,16 @@ export class ApiClient {
     return this.request(this.backendBase() + "/DB/ADRresults");
   }
 
+  updateAdrResult(dealId, itemId, payload) {
+    return this.request(this.backendBase() + "/DB/ADRresults/" + encodeURIComponent(dealId) + "/" + encodeURIComponent(itemId), {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+    });
+  }
+
+  deleteAdrResult(dealId, itemId) {
+    return this.request(this.backendBase() + "/DB/ADRresults/" + encodeURIComponent(dealId) + "/" + encodeURIComponent(itemId), { method: "DELETE" });
+  }
+
   getAdrResults(id) {
     return this.request(
       this.backendBase() + "/DB/ADRresults/DealingNumber/" + encodeURIComponent(id),

@@ -65,7 +65,7 @@ export function accountTableMarkup(accounts, editor, t, language = 'zh', sources
     <th scope="row">${input('name', 'name', f.name, 'maxlength="100" required')}</th>
     <td><select name="account_type" aria-label="${e(t('account_type'))}">${ACCOUNT_TYPES.map(type => option(type, t(type), type === f.account_type)).join('')}</select></td>
     <td>${input('institution', 'institutionLabel', f.institution, 'maxlength="100"')}</td>
-    <td><select name="currency" aria-label="${e(t('currency'))}">${['JPY', 'CNY'].map(c => option(c, c, c === f.currency)).join('')}</select></td>
+    <td><select name="currency" aria-label="${e(t('currency'))}">${['JPY', 'CNY', 'USD'].map(c => option(c, c, c === f.currency)).join('')}</select></td>
     <td>${balanceInput(f.opening_balance, f.account_type === 'credit', t)}</td>
     <td><span data-review-credit ${f.account_type === 'credit' ? '' : 'hidden'}>${input('credit_limit', 'credit_limit', f.credit_limit, 'inputmode="decimal"')}</span><span data-review-no-credit ${f.account_type === 'credit' ? 'hidden' : ''}>${blank}</span></td>
     <td>${blank}</td><td class="setup-account-row-actions"><button type="submit" class="setup-button primary">${e(t('saveShort'))}</button><button type="button" class="setup-button" data-review-action="cancel-account">${e(t('cancel'))}</button></td>

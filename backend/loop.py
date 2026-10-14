@@ -5,6 +5,7 @@ configure_utf8()
 from zhenze import zhenze
 from mail_access import MailClient as gmailM
 from database import DBmanage
+import assets
 from categorization import category
 import time
 import traceback
@@ -131,7 +132,7 @@ def get_bank_email(mailaddress, mail_name, account_number=1000, account_ref=""):
             iso_time, title_value, prices = fields["time"], fields["merchant"], fields["amount"]
             print("regex matched: " + str(bank_name))
 
-            CurrencyTypeNumber = 100 if fields["currency"] == "CNY" else 101
+            CurrencyTypeNumber = assets.currency_number(fields["currency"])
             AccountNumber = account_number
 
             shop_name, main_category, sub_category = CTG.Data_classification(title_value)
@@ -229,7 +230,7 @@ def get_bank_email_all(mailaddress, mail_name, account_number=1000, account_ref=
             iso_time, title_value, prices = fields["time"], fields["merchant"], fields["amount"]
             print("regex matched: " + str(bank_name))
 
-            CurrencyTypeNumber = 100 if fields["currency"] == "CNY" else 101
+            CurrencyTypeNumber = assets.currency_number(fields["currency"])
             AccountNumber = account_number
 
             shop_name, main_category, sub_category = CTG.Data_classification(title_value)
@@ -413,7 +414,7 @@ def process_ocr_text(prepared, db, agent_base_url, categorizer):
     shop_name = ocr_intent.get("merchant")
     prices = ocr_intent.get("amount")
     iso_time = ocr_intent.get("transaction_time")
-    CurrencyTypeNumber = {"JPY": 101, "CNY": 100}.get(ocr_intent.get("currency"))
+    CurrencyTypeNumber = assets.CURRENCY_NUMBERS.get(ocr_intent.get("currency"))
     if not shop_name or not iso_time or CurrencyTypeNumber is None:
         return "needs_review"
     if isinstance(prices, bool) or not isinstance(prices, (int, float)) or not math.isfinite(prices) or prices <= 0:

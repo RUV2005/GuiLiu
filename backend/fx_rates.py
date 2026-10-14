@@ -103,9 +103,13 @@ def get_settings():
 
 def set_primary_currency(value):
     # 主币种只影响展示和汇总，不改写账单原币金额或账户余额。
+    code = currency(value)
+    if code not in {"JPY", "CNY"}:
+        # USD is an account and bill currency; totals are shown in JPY or CNY.
+        raise AssetError("Primary currency must be JPY or CNY")
     with _lock:
         data = _read()
-        data["primary_currency"] = currency(value)
+        data["primary_currency"] = code
         try:
             _write(data)
         except OSError as error:
@@ -249,8 +253,12 @@ def _fill_historical_days(days, stop_event=None):
         quotes = {}
         for row in body:
             day = row["date"]
-            if (date.fromisoformat(day) < first or date.fromisoformat(day) > last
-                    or row["base"] != "USD" or row["quote"] not in {"JPY", "CNY"}):
+            # When the range starts on a day without an ECB quote (a weekend, a holiday, or a day not published yet),
+            # the service also returns the last business day before it. That is a real quote for its own, earlier
+            # date and outside this window: skip it rather than discard the whole window.
+            if date.fromisoformat(day) < first:
+                continue
+            if date.fromisoformat(day) > last or row["base"] != "USD" or row["quote"] not in {"JPY", "CNY"}:
                 raise ValueError("Historical FX date or currency mismatch")
             rates = quotes.setdefault(day, {"rates": {}, "as_of": day,
                                            "source": HISTORY_URL, "provider": "ecb"})["rates"]
@@ -388,6 +396,7 @@ def convert(amount, source_currency, target_currency, snapshot):
         rates = (snapshot or {}).get("rates")
         if not rates:
             return None
-        # 两种币种的报价均以 USD 为基准，先换算为基准币，再换算到目标币种。
+        # 两种币种的报价均以 USD 为基准，先换算为基准币，再换算到目标币种；USD 本身即基准，汇率为 1。
+        rates = {**rates, "USD": "1"}
         value = value / Decimal(rates[source]) * Decimal(rates[target])
-    return format(value.quantize(Decimal("0.01") if target == "CNY" else Decimal("1"), rounding=ROUND_HALF_UP), "f")
+    return format(value.quantize(Decimal("1") if target == "JPY" else Decimal("0.01"), rounding=ROUND_HALF_UP), "f")

@@ -1,7 +1,8 @@
 import {
-  sortIndicator, transactionAdrView, transactionEmptyRow, transactionFilters,
+  sortIndicator, transactionAdrView, transactionEmptyRow, transactionFilters, transactionActiveFilters, transactionPeriod,
   transactionRows, transactionSelection, transactionStructure,
 } from './views.js';
+import { activeTransactionFilters } from './ledger-model.js';
 import { formatJpy } from './utils.js';
 import { createTransactionScroller } from './transaction-scroller.js';
 import { patchDisclosure } from './ui-motion.js';
@@ -216,6 +217,16 @@ export function patchTransactionView(ctx) {
   setHtml(page.querySelector('[data-ledger-selection]'), transactionSelection(ctx));
   const filterSlot = page.querySelector('[data-ledger-filters]');
   patchDisclosure(filterSlot, ctx.state.filtersOpen, () => transactionFilters(ctx));
+  setHtml(page.querySelector('[data-ledger-active-filters]'), transactionActiveFilters(ctx));
+  // The open card keeps its nodes (so a date being typed keeps focus); only these states follow the filters.
+  const period = transactionPeriod(ctx.state.transactionFilters);
+  for (const button of filterSlot.querySelectorAll('[data-transaction-period]')) {
+    const on = button.dataset.transactionPeriod === period;
+    button.classList.toggle('is-active', on);
+    button.setAttribute('aria-pressed', String(on));
+  }
+  filterSlot.querySelector('[data-filter-custom-dates]')?.toggleAttribute('hidden', period !== 'custom');
+  filterSlot.querySelector('.filter-reset')?.toggleAttribute('hidden', !activeTransactionFilters(ctx.state.transactionFilters).length);
   for (const input of page.querySelectorAll('[data-filter]')) {
     const value = ctx.state.transactionFilters[input.dataset.filter];
     if (input !== document.activeElement && input.value !== value) input.value = value;

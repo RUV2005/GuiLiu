@@ -91,7 +91,7 @@ class ImportPreset(BaseModel):
     version: int = Field(ge=1)
     extensions: list[Literal[".csv", ".xlsx"]]
     encodings: list[Literal["utf-8-sig", "gb18030", "utf-16"]] = ["utf-8-sig", "gb18030"]
-    default_currency: Literal["CNY", "JPY"] | None = None
+    default_currency: Literal["CNY", "JPY", "USD"] | None = None
     default_timezone: str = "Asia/Shanghai"
     columns: dict[str, str]
     expense_values: list[str] = Field(min_length=1, max_length=20)
@@ -343,7 +343,7 @@ def normalize_rows(tables, preset, file_hash, account_number, timezone=None, cur
                 fields[field] = match.group(1) if match.lastindex else match.group(0)
             source_currency = fields.get("currency")
             code = assets.currency(source_currency or preset.default_currency or currency or "")
-            amount_text = regex.sub(r"^(?:CNY|RMB|JPY|[¥￥])\s*|\s*(?:元|円|CNY|JPY|RMB)$", "", fields["amount"], flags=regex.IGNORECASE).replace(",", "").strip()
+            amount_text = regex.sub(r"^(?:CNY|RMB|JPY|USD|US\$|[¥￥$＄])\s*|\s*(?:元|円|ドル|美元|CNY|JPY|RMB|USD)$", "", fields["amount"], flags=regex.IGNORECASE).replace(",", "").strip()
             if not regex.fullmatch(r"-?\d+(?:\.\d+)?", amount_text):
                 raise ValueError("Invalid amount")
             minor = assets.minor_amount(amount_text, code)
@@ -359,7 +359,7 @@ def normalize_rows(tables, preset, file_hash, account_number, timezone=None, cur
                 raise ValueError("Transaction ID was converted to a formula or scientific notation")
             row["normalized"] = {"shop_name": fields["shop_name"], "raw_shop_name": fields["shop_name"],
                 "product_name": fields.get("product_name", ""), "price": assets.major_amount(minor, code),
-                "CurrencyTypeNumber": 100 if code == "CNY" else 101, "isotime": when,
+                "CurrencyTypeNumber": assets.currency_number(code), "isotime": when,
                 "AccountNumber": account_number, "main_category": "", "sub_category": "", "detail_category": "",
                 "payment_method": fields.get("payment_method", ""), "transaction_id": transaction_id,
                 "merchant_order_id": fields.get("merchant_order_id", ""), "provider": preset.provider,
@@ -420,7 +420,7 @@ def find_duplicate_transaction(conn, row, window_minutes=1):
         FROM DealingData d WHERE d.CurrencyTypeNumber IN (?,?,?) AND ABS(d.price-?)<0.000001
         AND julianday(d.ISOtime) BETWEEN julianday(?) AND julianday(?)
         ORDER BY ABS(julianday(d.ISOtime)-julianday(?)), d.DealingNumber""",
-        ((*((100, 0, 1) if assets.currency(data["CurrencyTypeNumber"]) == "CNY" else (101, 101, 101)),
+        ((*{"CNY": (100, 0, 1), "JPY": (101, 101, 101), "USD": (102, 102, 102)}[assets.currency(data["CurrencyTypeNumber"])],
           data["price"], (when - window).isoformat(), (when + window).isoformat(), data["isotime"])))
     aliases = {data["shop_name"], data.get("raw_shop_name", "")}
     for key, name in conn.execute("SELECT key, ShopName FROM ShopName"):
@@ -576,7 +576,13 @@ class ImportService:
             try:
                 result = self.call_agent("/agent/import/preset-suggest", {"samples": samples, "extension": Path(job["source_path"]).suffix,
                                          "schema": ImportPreset.model_json_schema()})
-                draft = ImportPreset.model_validate(result["preset"])
+                # The prompt asks for {"preset": {...}}; models also answer with the preset itself, which is just as
+                # usable. An answer without columns is the model saying it could not map the file.
+                preset = result.get("preset", result) if isinstance(result, dict) else None
+                if not isinstance(preset, dict) or "columns" not in preset:
+                    reason = result.get("error") if isinstance(result, dict) else None
+                    raise ImportProblem(str(reason or "the model suggested no mapping")[:200])
+                draft = ImportPreset.model_validate(preset)
                 job["mapping_suggestion"] = draft.model_dump()
             except Exception as error:
                 job["warnings"].append("preset_suggestion_failed: " + str(error)[:300])

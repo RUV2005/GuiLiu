@@ -22,14 +22,14 @@ import { createAiStarfield } from './ai-starfield.js';
 import { localizeMarkup, captureLanguagePosition } from './language-view.js';
 import { DEFAULT_RATES, DEFAULT_SETTINGS, ROUTE_ALIASES, ROUTES, STORAGE, normalizePrimaryCurrency } from "./config.js";
 import { LANGUAGES, localeFor, t } from "./i18n.js";
-import { createMemo, equalData, filterTransactions, reconcileDeals, transactionIndex } from './ledger-model.js';
+import { activeTransactionFilters, createMemo, equalData, filterTransactions, reconcileDeals, transactionIndex, transactionPeriodRange } from './ledger-model.js';
 import { patchTransactionView, primeTransactionView, patchAdrRow, patchTransactionCategoryIcons, patchCategoryIconPicker } from './transaction-view.js';
 import { normalizeCategoryIcons, withCategoryIconPreference, categoryIconText, setCategoryIconPickerScope, normalizeCategoryIconScope,
   categoryIconDraft, updateCategoryIconDraft } from './category-icons.js';
 import { patchAssetsView, primeAssetsView } from './assets-view.js';
 import { ASSET_PERIODS, createAssetState, findAssetAccount, assetsData, assetCurrency, operationKey, decimalAmount } from './assets-model.js';
 import { createAssetsController } from './assets-controller.js';
-import { agentPanel, appShell, modalMarkup, routeView, toastMarkup, transactionEditActions, refreshOverviewTransactions } from "./views.js";
+import { agentPanel, appShell, modalMarkup, routeView, searchResults, toastMarkup, transactionEditActions, refreshOverviewTransactions } from "./views.js";
 import { createAgentChat } from './agent-chat.js';
 import { historySendBlocked, sessionTitle } from './agent-history.js';
 import { historyText } from './agent-history-view.js';
@@ -159,12 +159,13 @@ const state = {
   assetPreview: { account: 'all', period: '6m', kind: 'all', query: '', sort: 'value-desc' },
   assets: createAssetState(),
   transactionFilters: {
-    id: "",
     shop: "",
     mainCategory: "",
     subCategory: "",
     startDate: "",
     endDate: "",
+    period: "",
+    account: "",
   },
   transactionSort: { field: "time", direction: "desc" },
   transactionScrollReset: 0,
@@ -447,7 +448,7 @@ function currentContext() {
   const filterUnknownRows = () => state.systemUnknownRows.filter((row) => {
     return !unknownSearch.TitleValue || String(row.TitleValue || "").toLowerCase().includes(unknownSearch.TitleValue.toLowerCase());
   });
-  const activeFilterCount = Object.values(state.transactionFilters).filter((value) => String(value || "").trim()).length;
+  const activeFilterCount = activeTransactionFilters(state.transactionFilters).length;
   return {
     state,
     language: state.settings.language,
@@ -813,11 +814,13 @@ async function refreshExchangeRates() {
     {
       url: "https://open.er-api.com/v6/latest/CNY",
       value: (data) => Number(data?.rates?.JPY),
+      usd: (data) => Number(data?.rates?.JPY) / Number(data?.rates?.USD),
       date: (data) => data?.time_last_update_utc,
     },
     {
-      url: "https://api.frankfurter.app/latest?from=CNY&to=JPY",
+      url: "https://api.frankfurter.app/latest?from=CNY&to=JPY,USD",
       value: (data) => Number(data?.rates?.JPY),
+      usd: (data) => Number(data?.rates?.JPY) / Number(data?.rates?.USD),
       date: (data) => data?.date,
     },
   ];
@@ -828,7 +831,10 @@ async function refreshExchangeRates() {
       const data = await response.json();
       const rate = source.value(data);
       if (!Number.isFinite(rate) || rate <= 0) continue;
-      state.rates = { JPY: 1, RMB: rate, CNY: rate, updatedAt: source.date(data) || new Date().toISOString(), source: source.url };
+      // Both quotes come from one CNY-based answer: yen per yuan, and yen per dollar from the same moment.
+      const usd = source.usd(data);
+      state.rates = { JPY: 1, RMB: rate, CNY: rate, USD: Number.isFinite(usd) && usd > 0 ? usd : DEFAULT_RATES.USD,
+        updatedAt: source.date(data) || new Date().toISOString(), source: source.url };
       writeJson(STORAGE.exchangeRates, state.rates);
       if (!activeTextEntry()) renderMain();
       return rate;
@@ -995,9 +1001,46 @@ function dealIndex() {
   return memo('dealIndex', [state.deals], () => new Map(state.deals.map((deal) => [String(deal.DealingNumber), deal])));
 }
 
+// The dock search hands its text to the transactions merchant search.
+function searchTransactions(query) {
+  state.transactionFilters.shop = query;
+  state.transactionScrollReset += 1;
+  navigate("transactions");
+}
+
+// Results follow the dock search field as you type. Only the list is replaced, so the field keeps focus and any
+// input method state; the dock panel then refits to the new height.
+function patchGlobalSearch(input) {
+  const wrap = input.closest(".global-search-wrap");
+  if (!wrap) return;
+  wrap.querySelector(".search-popover")?.remove();
+  if (String(state.globalSearch || "").trim()) {
+    wrap.insertAdjacentHTML("beforeend", searchResults({ state, language: state.settings.language, t: tx }));
+  }
+  scrollDock.sync();
+}
+
+document.addEventListener("compositionend", (event) => {
+  if (event.target instanceof HTMLInputElement && event.target.matches("[data-global-search]")) {
+    state.globalSearch = event.target.value;
+    patchGlobalSearch(event.target);
+  }
+});
+
 function findDeal(id) {
   return dealIndex().get(String(id));
 }
+
+// Drafts are keyed by bill number, or adr:<bill>:<item> for an item line under a bill.
+const isAdrDraft = id => String(id).startsWith('adr:');
+function findAdrItem(id) {
+  const [, deal, item] = String(id).split(':');
+  const row = (state.adrByDeal[deal] || []).find(entry => String(entry.SubDealingNumber) === item);
+  return row ? { deal: findDeal(deal), row } : null;
+}
+const findEditable = id => isAdrDraft(id) ? findAdrItem(id)?.row : findDeal(id);
+const draftRow = (id, root = document) => root.querySelector(isAdrDraft(id)
+  ? '[data-adr-draft-row="' + CSS.escape(String(id)) + '"]' : '[data-deal-row="' + CSS.escape(String(id)) + '"]');
 
 function replaceDeal(id, changes) {
   state.deals = state.deals.map((deal) => String(deal.DealingNumber) === String(id) ? { ...deal, ...changes } : deal);
@@ -1190,7 +1233,7 @@ function setLanguage(language) {
     if (languageSelect) languageSelect.value = ctx.language;
     patchTransactionView(ctx);
     for (const [id, draft] of state.dealDrafts) {
-      const row = shell.querySelector('[data-deal-row="' + CSS.escape(id) + '"]');
+      const row = draftRow(id, shell);
       localizeMarkup(row?.querySelector('[data-deal-edit-actions]'), transactionEditActions(ctx, id, draft.saving));
     }
     primeAssetsView(ctx);
@@ -1299,6 +1342,14 @@ document.addEventListener("click", async (event) => {
     notify(categoryIconText(state.settings.language, 'saved'), 'success');
     return;
   }
+  if (target.closest('[data-settings-discard]')) {
+    // The save bar's one way back: the runtime draft and the form fields return to what is saved.
+    if (state.settingsSaving) return;
+    runtimeSettings.discard();
+    settingsSave.clearNotice();
+    renderMain();
+    return;
+  }
   if (target.closest('[data-assets-open], [data-assets-changes-more], [data-assets-refresh], [data-assets-revoke], [data-assets-deal], [data-assets-display-currency]')) {
     await assetController.click(target);
     return;
@@ -1320,6 +1371,10 @@ document.addEventListener("click", async (event) => {
   }
   if (target.closest("[data-modal-sheet]")) event.stopPropagation();
 
+  if (target.closest("[data-search-all]")) {
+    searchTransactions(String(state.globalSearch || "").trim());
+    return;
+  }
   const routeButton = target.closest("[data-route-button], [data-search-route]");
   if (routeButton) {
     navigate(routeButton.dataset.routeButton || routeButton.dataset.searchRoute);
@@ -1402,6 +1457,29 @@ document.addEventListener("click", async (event) => {
     if (deal) openModal("transaction", deal);
     return;
   }
+  const period = target.closest('[data-transaction-period]');
+  if (period) {
+    const value = period.dataset.transactionPeriod;
+    // Custom starts from the range shown so far; a preset leaves the custom dates for later.
+    if (value === 'custom' && !state.transactionFilters.startDate && !state.transactionFilters.endDate) {
+      const range = transactionPeriodRange(state.transactionFilters);
+      state.transactionFilters.startDate = range.start ? dateInputValue(range.start) : '';
+      state.transactionFilters.endDate = range.end ? dateInputValue(range.end) : '';
+    }
+    state.transactionFilters.period = value;
+    if (!value) { state.transactionFilters.startDate = ''; state.transactionFilters.endDate = ''; }
+    state.transactionScrollReset += 1;
+    renderMain({ preserveFocus: true });
+    return;
+  }
+  const clearOne = target.closest('[data-clear-filter]');
+  if (clearOne) {
+    const key = clearOne.dataset.clearFilter;
+    for (const name of key === 'period' ? ['period', 'startDate', 'endDate'] : [key]) state.transactionFilters[name] = '';
+    state.transactionScrollReset += 1;
+    renderMain({ preserveFocus: true });
+    return;
+  }
   if (target.closest("[data-toggle-filters]")) {
     state.filtersOpen = !state.filtersOpen;
     renderMain();
@@ -1424,6 +1502,15 @@ document.addEventListener("click", async (event) => {
   }
   if (target.closest("[data-delete-selected-deals]")) {
     await deleteSelectedDeals();
+    return;
+  }
+  const deleteItem = target.closest("[data-delete-adr]");
+  if (deleteItem) {
+    try {
+      if (await deleteAdrItem(deleteItem.dataset.deleteAdr)) { renderMain(); notify(tx("deleted"), "success"); }
+    } catch (error) {
+      notify(error.message, "error");
+    }
     return;
   }
   const deleteButton = target.closest("[data-delete-deal]");
@@ -1600,11 +1687,15 @@ document.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (form.dataset.saving) return;
     const data = new FormData(form);
+    // The time field shows minutes only. Left at the prefilled "now", the bill keeps the second the form opened,
+    // so a bill entered right after an account's opening balance (recorded to the second) still counts.
+    const time = form.elements.isotime;
+    const openedNow = form.dataset.openedAt && time && time.value === time.defaultValue;
     const payload = {
       shop_name: String(data.get("shop_name") || "").trim(),
       price: Number(data.get("price") || 0),
       CurrencyTypeNumber: Number(data.get("CurrencyTypeNumber") || 101),
-      isotime: new Date(String(data.get("isotime") || new Date())).toISOString(),
+      isotime: openedNow ? form.dataset.openedAt : new Date(String(data.get("isotime") || new Date())).toISOString(),
       main_category: String(data.get("main_category") || "").trim(),
       sub_category: String(data.get("sub_category") || "").trim(),
       AccountNumber: String(data.get("AccountNumber") || "").trim(),
@@ -1764,6 +1855,12 @@ document.addEventListener("change", (event) => {
     setLanguage(target.value);
     return;
   }
+  if (target.matches('select[data-filter]')) {
+    state.transactionFilters[target.dataset.filter] = target.value;
+    state.transactionScrollReset += 1;
+    renderMain({ preserveFocus: true });
+    return;
+  }
   if (target.matches('[data-theme-select]')) {
     state.theme = applyTheme(target.type === 'checkbox' ? (target.checked ? 'dark' : 'light') : target.value, state.settings.language);
     writeJson(STORAGE.theme, state.theme);
@@ -1848,10 +1945,13 @@ document.addEventListener("input", (event) => {
   }
   if (target.matches("[data-global-search]")) {
     state.globalSearch = target.value;
+    // Pinyin or kana still being composed is not a query yet; compositionend patches the results.
+    if (!event.isComposing) patchGlobalSearch(target);
     return;
   }
   if (target.matches("[data-filter]")) {
     state.transactionFilters[target.dataset.filter] = target.value;
+    if (['startDate', 'endDate'].includes(target.dataset.filter)) state.transactionFilters.period = 'custom';
     state.transactionScrollReset += 1;
     clearTimeout(filterTimer);
     filterTimer = window.setTimeout(() => renderMain({ preserveFocus: true }), 160);
@@ -1956,15 +2056,20 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (target.matches("[data-global-search]") && event.key === "Enter") {
+    if (event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     const query = String(target.value || "").trim();
     const deal = findDeal(query.replace(/^#/, ''));
     if (deal) openModal("deal-detail", deal);
-    else {
-      state.transactionFilters.shop = query;
-      state.transactionScrollReset += 1;
-      navigate("transactions");
-    }
+    else searchTransactions(query);
+    return;
+  }
+  // Arrow keys move from the search field through its results and back.
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && target.closest(".global-search-wrap")) {
+    const wrap = target.closest(".global-search-wrap"), field = wrap.querySelector("[data-global-search]");
+    const items = [field, ...wrap.querySelectorAll(".search-popover button")];
+    const next = items[items.indexOf(target) + (event.key === "ArrowDown" ? 1 : -1)];
+    if (next && items.length > 1) { event.preventDefault(); next.focus(); }
     return;
   }
   if (event.key === "Escape" && state.modal) closeModal();
@@ -2029,7 +2134,7 @@ document.addEventListener("pointerup", () => {
 function startDealInlineEdit(button) {
   const id = String(button.dataset.editDeal);
   const field = button.dataset.field;
-  const deal = findDeal(id);
+  const deal = findEditable(id);
   if (!deal || !field) return;
   if (!document.querySelector('[data-edit-deal="' + CSS.escape(id) + '"][data-field="' + CSS.escape(field) + '"]')) return;
   let draft = state.dealDrafts.get(id);
@@ -2041,7 +2146,7 @@ function startDealInlineEdit(button) {
     dealEditEpoch += 1;
   }
   if (!(field in draft.values)) {
-    const value = deal[field] ?? '';
+    const value = field === 'ProductName' ? deal.ProductName || deal.ShopName || '' : deal[field] ?? '';
     if (field === 'ISOtime') {
       const date = toDate(value);
       draft.values[field] = date ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
@@ -2058,7 +2163,7 @@ function mountDealDraftField(id, field, draft) {
   const key = id + ':' + field;
   const mounted = dealEditorNodes.get(key);
   if (mounted?.input.isConnected) return mounted.input;
-  const row = document.querySelector('[data-deal-row="' + CSS.escape(id) + '"]');
+  const row = draftRow(id);
   const button = row?.querySelector('[data-edit-deal][data-field="' + CSS.escape(field) + '"]');
   if (!button) return null;
   amountHover.clearWithin(button);
@@ -2066,19 +2171,30 @@ function mountDealDraftField(id, field, draft) {
   input.className = "inline-editor";
   input.dataset.inlineField = field;
   input.dataset.draftId = id;
-  input.setAttribute('aria-label', tx({ ShopName: 'merchant', price: 'amount', ISOtime: 'date', MainCategory: 'mainCategory', SubCategory: 'subCategory' }[field] || field));
+  input.setAttribute('aria-label', tx({ ShopName: 'merchant', ProductName: 'productName', Quantity: 'quantity', price: 'amount', ISOtime: 'date',
+    MainCategory: 'mainCategory', SubCategory: 'subCategory' }[field] || field));
   if (field === "price") {
     input.type = "number";
     input.step = "0.01";
     input.required = true;
+  } else if (field === "Quantity") {
+    input.type = "number";
+    input.step = "any";
+    input.min = "0";
+  } else if (field === "ProductName") {
+    input.type = "text";
+    input.required = true;
+    input.maxLength = 200;
   } else if (field === "ISOtime") {
     input.type = "datetime-local";
     input.required = true;
   } else {
     input.type = "text";
     if (field === "MainCategory" || field === "SubCategory") {
+      // The shared suggestion menu (as in the filters); a new name typed here is kept as typed.
       const listId = "inline-" + field.toLowerCase() + "-options";
-      input.setAttribute("list", listId);
+      Object.assign(input.dataset, { categoryList: listId, categoryEntry: 'free' });
+      for (const [key, value] of [['role', 'combobox'], ['aria-autocomplete', 'list'], ['aria-haspopup', 'listbox'], ['aria-expanded', 'false'], ['autocomplete', 'off']]) input.setAttribute(key, value);
       let list = document.getElementById(listId);
       if (!list) {
         list = document.createElement("datalist");
@@ -2128,7 +2244,7 @@ function updateDealDraftUi() {
   const bulkDelete = document.querySelector('[data-delete-selected-deals]');
   if (bulkDelete) bulkDelete.disabled = state.dealDrafts.size > 0;
   for (const [id, draft] of state.dealDrafts) {
-    const row = document.querySelector('[data-deal-row="' + CSS.escape(id) + '"]');
+    const row = draftRow(id);
     if (!row) continue;
     row.classList.add('has-draft');
     const actions = row.querySelector('.row-actions');
@@ -2152,17 +2268,18 @@ function cancelDealDraft(id) {
   if (state.dealDrafts.get(id)?.saving) return;
   state.dealDrafts.delete(id);
   dealEditEpoch += 1;
-  const deal = findDeal(id);
+  const deal = findEditable(id);
   for (const [key, node] of dealEditorNodes) {
     if (node.id !== id) continue;
-    if (deal) {
+    // An item line's buttons keep their own markup (label and value); a save re-renders them anyway.
+    if (deal && !isAdrDraft(id)) {
       node.button.textContent = inlineDealDisplay(deal, node.field);
       node.button.classList.toggle('is-missing', node.field === 'MainCategory' && !String(deal.MainCategory || '').trim());
     }
     node.wrapper.replaceWith(node.button);
     dealEditorNodes.delete(key);
   }
-  const row = document.querySelector('[data-deal-row="' + CSS.escape(id) + '"]');
+  const row = draftRow(id);
   if (row) {
     row.classList.remove('has-draft');
     const actions = row.querySelector('.row-actions');
@@ -2174,6 +2291,7 @@ function cancelDealDraft(id) {
 
 async function saveDealDraft(id) {
   id = String(id);
+  if (isAdrDraft(id)) return saveAdrDraft(id);
   const draft = state.dealDrafts.get(id);
   const deal = findDeal(id);
   if (!draft || !deal) return false;
@@ -2228,6 +2346,77 @@ async function saveDealDraft(id) {
     }
   })().finally(() => { draft.savePromise = null; });
   return draft.savePromise;
+}
+
+// The full item line the Backend expects, with the user's changes on top of the saved values.
+function adrItemPayload(deal, row, changes) {
+  return {
+    DealingNumber: Number(deal.DealingNumber), SubDealingNumber: Number(row.SubDealingNumber),
+    CurrencyTypeNumber: Number(row.CurrencyTypeNumber ?? deal.CurrencyTypeNumber), ShopName: String(row.ShopName ?? deal.ShopName ?? ''),
+    ProductName: String(row.ProductName || row.ShopName || ''), Quantity: row.Quantity ?? null, ISOtime: String(row.ISOtime || deal.ISOtime || ''),
+    MainCategory: String(row.MainCategory ?? ''), SubCategory: String(row.SubCategory ?? ''), DetailCategory: String(row.DetailCategory ?? ''),
+    AccountNumber: row.AccountNumber ?? deal.AccountNumber ?? null, price: Number(row.price), msgid: row.msgid ?? null,
+    ...changes,
+  };
+}
+
+async function saveAdrDraft(id) {
+  const draft = state.dealDrafts.get(id), item = findAdrItem(id);
+  if (!draft || !item?.deal) return false;
+  if (draft.savePromise) return draft.savePromise;
+  if (draft.saving) return false;
+  const { deal, row } = item, changes = {};
+  for (const [field, raw] of Object.entries(draft.values)) {
+    if (raw === draft.initialValues[field]) continue;
+    const input = dealEditorNodes.get(id + ':' + field)?.input;
+    const text = String(raw).trim();
+    const after = field === 'price' ? Number(text) : field === 'Quantity' ? (text === '' ? null : Number(text)) : text;
+    // A name is required (automatic enrichment relies on it); amounts must be numbers; a quantity may be left empty.
+    if ((field === 'price' && (!text || !Number.isFinite(after))) || (field === 'Quantity' && after !== null && !(Number.isFinite(after) && after >= 0)) ||
+        (field === 'ProductName' && !text) || (input?.isConnected && !input.checkValidity())) {
+      input?.reportValidity();
+      notify(tx('invalidEditValue'), 'error');
+      return false;
+    }
+    const before = field === 'ProductName' ? row.ProductName || row.ShopName : row[field];
+    if (String(after ?? '') !== String(before ?? '')) changes[field] = after;
+  }
+  if (!Object.keys(changes).length) { cancelDealDraft(id); return true; }
+  draft.saving = true;
+  dealEditEpoch += 1;
+  updateDealDraftUi();
+  draft.savePromise = (async () => {
+    try {
+      await api.updateAdrResult(deal.DealingNumber, row.SubDealingNumber, adrItemPayload(deal, row, changes));
+      const key = String(deal.DealingNumber);
+      state.adrByDeal = { ...state.adrByDeal, [key]: (state.adrByDeal[key] || []).map(entry => entry === row ? { ...entry, ...changes } : entry) };
+      addActivity(tx('saved'), '#' + key + ' ' + (changes.ProductName || row.ProductName || row.ShopName || ''), 'ledger');
+      draft.saving = false;
+      cancelDealDraft(id);
+      renderMain();
+      notify(tx('saved'), 'success');
+      return true;
+    } catch (error) {
+      draft.saving = false;
+      updateDealDraftUi();
+      notify(error.message, 'error');
+      document.querySelector('[data-draft-id="' + CSS.escape(id) + '"]')?.focus({ preventScroll: true });
+      return false;
+    }
+  })().finally(() => { draft.savePromise = null; });
+  return draft.savePromise;
+}
+
+async function deleteAdrItem(id) {
+  const item = findAdrItem(id);
+  if (!item?.deal || state.dealDrafts.size) return false;
+  const name = item.row.ProductName || item.row.ShopName || '';
+  if (!window.confirm(tx('deleteItemConfirm', { name }))) return false;
+  await api.deleteAdrResult(item.deal.DealingNumber, item.row.SubDealingNumber);
+  const key = String(item.deal.DealingNumber);
+  state.adrByDeal = { ...state.adrByDeal, [key]: (state.adrByDeal[key] || []).filter(entry => entry !== item.row) };
+  addActivity(tx('delete'), '#' + key + ' ' + name, 'ledger');
+  return true;
 }
 
 function inlineDealDisplay(deal, field) {
@@ -2369,11 +2558,13 @@ function agentRequestContext() {
   const sourcePage = state.route === 'agent' ? state.agentReturnRoute : state.route;
   const range = contextRange(state.settings.contextRange);
   const filters = state.transactionFilters;
-  const start = sourcePage === 'transactions' && filters.startDate ? new Date(filters.startDate + 'T00:00:00') : range.start;
-  const end = sourcePage === 'transactions' && filters.endDate ? new Date(filters.endDate + 'T00:00:00') : range.end;
-  if (sourcePage === 'transactions' && filters.endDate) end.setDate(end.getDate() + 1);
-  else if (end) end.setTime(end.getTime() + 1);
-  const account = sourcePage === 'assets' ? state.assetPreview.account : state.settings.contextAccount;
+  // On the transactions page the period of its filter bar is the context range.
+  const filtered = sourcePage === 'transactions' ? transactionPeriodRange(filters) : { start: null, end: null };
+  const start = filtered.start || range.start;
+  const end = filtered.end ? new Date(filtered.end.getTime()) : range.end;
+  if (end) end.setTime(end.getTime() + 1);
+  const filteredAccount = sourcePage === 'transactions' && filters.account && filters.account !== 'none' ? filters.account : '';
+  const account = sourcePage === 'assets' ? state.assetPreview.account : filteredAccount || state.settings.contextAccount;
   return {
     page: sourcePage, account_number: account === 'all' ? null : account,
     currency: assetCurrency(state.settings.contextCurrency),

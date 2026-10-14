@@ -13,7 +13,7 @@ from data_retrieval import _read_backend, _time
 from runtime_settings import backend_url
 
 
-CURRENCIES = {"CNY": 100, "JPY": 101}
+CURRENCIES = {"CNY": 100, "JPY": 101, "USD": 102}
 MAX_CANDIDATES = 20
 MATCH_SECONDS = 120
 log = logging.getLogger("uvicorn.error.ocr_intent")
@@ -84,7 +84,7 @@ def _recover_amount_quote(quote, source, amount, currency):
               "Total", "Amount paid")
     label_pattern = "|".join(r"\s*".join(re.escape(c) for c in label if not c.isspace())
                              for label in sorted(labels, key=len, reverse=True))
-    pattern = rf"(?:{label_pattern})\s*[:：]?\s*(?:[¥￥]|JPY|CNY|RMB)?\s*\d[\d,.]*"
+    pattern = rf"(?:{label_pattern})\s*[:：]?\s*(?:[¥￥$＄]|US\$|JPY|CNY|RMB|USD)?\s*\d[\d,.]*"
     source = text(source)
     spans, values = [], set()
     for match in re.finditer(pattern, source, re.I):
@@ -210,7 +210,8 @@ def validate_receipt(data, ocr_text):
         raise ValueError("The paid amount is absent from its OCR quote")
     timestamp = datetime.fromisoformat(str(data.get("transaction_time", "")).replace("Z", "+00:00"))
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone(timedelta(hours=9 if currency == "JPY" else 8)))
+        # A yuan receipt was printed in China (UTC+8); yen and dollar receipts keep the app's Japan time.
+        timestamp = timestamp.replace(tzinfo=timezone(timedelta(hours=8 if currency == "CNY" else 9)))
     time_quote, _ = _receipt_layout(data["time_evidence"])
     date_pattern = rf"{timestamp.year}\D+0?{timestamp.month}\D+0?{timestamp.day}(?!\d)"
     clock_pattern = rf"(?<!\d)0?{timestamp.hour}[:時时]0?{timestamp.minute}(?!\d)"

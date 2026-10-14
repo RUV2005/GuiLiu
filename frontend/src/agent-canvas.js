@@ -59,15 +59,26 @@ export function canvasLayout(charts, datasets = [], mode = 'auto') {
   return layout;
 }
 
+// The Agent sometimes draws one chart twice under two IDs; the same type, labels and data are shown once.
+function chartSignature(chart, datasets) {
+  const { id, dataset_id: datasetId, ...rest } = chart;
+  const dataset = (datasets || []).find(item => item?.id === datasetId);
+  return JSON.stringify([rest, dataset ? { ...dataset, id: undefined } : datasetId ?? null]);
+}
+
 export function canvasBlocks(charts, datasets = [], reportValue) {
   const report = normalizeCanvasReport(reportValue, charts);
-  const blocks = [];
+  const blocks = [], seen = new Set();
   if (report?.title || report?.summary) blocks.push({ key: 'intro', type: 'intro', title: report.title, summary: report.summary });
   const groups = report?.sections.length ? report.sections : [{ chart_ids: charts.map(chart => chart.id), layout: 'auto' }];
   const byId = new Map(charts.map(chart => [chart.id, chart]));
   for (const group of groups) {
     if (group.id) blocks.push({ key: 'section:' + group.id, type: 'section', title: group.title, summary: group.summary });
-    const members = group.chart_ids.map(id => byId.get(id));
+    const members = group.chart_ids.map(id => byId.get(id)).filter(chart => {
+      const signature = chart && chartSignature(chart, datasets);
+      if (!chart || seen.has(signature)) return false;
+      seen.add(signature); return true;
+    });
     const layout = canvasLayout(members, datasets, group.layout);
     const primary = members.findIndex(chart => chart.type !== 'metric');
     members.forEach((chart, index) => blocks.push({ key: 'chart:' + chart.id, type: 'chart', chart, layout: layout[index],

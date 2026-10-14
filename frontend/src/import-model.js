@@ -20,7 +20,8 @@ const unclassified = value => !String(value ?? '').trim() || ['未分类', '未�
 
 export function createImportState() {
   return { scope: '', job: null, file: null, form: { account_number: '', preset_id: '', use_agent: true,
-    timezone: 'Asia/Shanghai', default_currency: 'CNY', sheet_name: '' },
+    // '' = the chosen account's currency, for files without a currency column.
+    timezone: 'Asia/Shanghai', default_currency: '', sheet_name: '' },
     presets: [], accounts: [], setupLoaded: false, setupLoading: false, setupError: '',
     rows: [], rowCache: new Map(), rowsRevision: null, nextOffset: null, total: 0, filter: '', query: '',
     choices: new Map(), distinct: new Set(), externalIncome: new Set(), editor: null, expanded: new Set(),
@@ -59,6 +60,7 @@ export function correctionValues(draft, row) {
 export function currencyLabel(code) {
   if ([100, 0, 1, '100', '0', '1', 'CNY', 'RMB'].includes(code)) return 'CNY';
   if ([101, '101', 'JPY'].includes(code)) return 'JPY';
+  if ([102, '102', 'USD'].includes(code)) return 'USD';
   return String(code ?? '');
 }
 export function selectImportRow(state, row, action) {

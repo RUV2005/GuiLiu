@@ -4,9 +4,12 @@ export function matchingCategories(values, query = '') {
     .filter((value) => value.toLowerCase().includes(needle));
 }
 
+// Narrow anchors (an inline table editor) still get a readable list, at least MENU_MIN_WIDTH wide.
+export const MENU_MIN_WIDTH = 200;
+
 export function categoryMenuPosition(anchor, viewport, contentHeight) {
   const edge = 8, gap = 6;
-  const width = Math.max(0, Math.min(anchor.width, viewport.width - edge * 2));
+  const width = Math.max(0, Math.min(Math.max(anchor.width, MENU_MIN_WIDTH), viewport.width - edge * 2));
   const bottom = viewport.top + viewport.height - edge;
   const below = Math.max(0, bottom - anchor.bottom - gap);
   const above = Math.max(0, anchor.top - viewport.top - edge - gap);
@@ -20,7 +23,9 @@ export function categoryMenuPosition(anchor, viewport, contentHeight) {
 }
 
 export function createCategoryFilterMenu({ document: doc = globalThis.document, window: win = globalThis.window } = {}) {
-  let input, menu, options = [], active = -1, query = '', version = '', animation, frame, committing = false;
+  // `navigated` is set once the arrow keys pick a row; free-entry fields (editors) only take a row on Enter then.
+  let input, menu, options = [], active = -1, query = '', version = '', animation, frame, committing = false, navigated = false, blank = false;
+  const freeEntry = () => input?.dataset.categoryEntry === 'free';
   const listeners = [];
   const asInput = (node) => node?.matches?.('input[data-category-list]') ? node : null;
   const listen = (node, type, handler, capture = false) => {
@@ -37,7 +42,7 @@ export function createCategoryFilterMenu({ document: doc = globalThis.document, 
     observer?.disconnect();
     if (frame !== undefined) win.cancelAnimationFrame(frame);
     frame = undefined;
-    menu?.remove(); menu = null; input = null; options = []; active = -1; version = '';
+    menu?.remove(); menu = null; input = null; options = []; active = -1; version = ''; navigated = false; blank = false;
   }
 
   function position() {
@@ -47,7 +52,7 @@ export function createCategoryFilterMenu({ document: doc = globalThis.document, 
     const viewport = { left: visual?.offsetLeft || 0, top: visual?.offsetTop || 0,
       width: visual?.width || win.innerWidth, height: visual?.height || win.innerHeight };
     if (rect.bottom <= viewport.top || rect.top >= viewport.top + viewport.height) { close(); return; }
-    menu.style.width = Math.min(rect.width, viewport.width - 16) + 'px';
+    menu.style.width = Math.min(Math.max(rect.width, MENU_MIN_WIDTH), viewport.width - 16) + 'px';
     const layout = categoryMenuPosition(rect, viewport, menu.scrollHeight + 2);
     for (const key of ['left', 'top', 'width', 'maxHeight']) menu.style[key] = layout[key] + 'px';
   }
@@ -89,11 +94,14 @@ export function createCategoryFilterMenu({ document: doc = globalThis.document, 
         return option;
       });
       menu.replaceChildren(...options);
-      if (!options.length) {
+      if (!options.length && input.dataset.emptyLabel) {
         const empty = doc.createElement('p'); empty.className = 'category-filter-empty';
         empty.setAttribute('role', 'status'); empty.textContent = input.dataset.emptyLabel;
         menu.append(empty);
       }
+      // A field without an empty message (an editor that accepts new names) simply shows nothing.
+      blank = !options.length && !input.dataset.emptyLabel;
+      menu.classList.toggle('is-empty', blank);
       highlight(values.indexOf(previous ?? input.value));
     }
     position();
@@ -105,7 +113,8 @@ export function createCategoryFilterMenu({ document: doc = globalThis.document, 
       close(); input = target;
       menu = doc.createElement('div');
       menu.id = target.dataset.categoryList + '-menu'; menu.className = 'category-filter-menu';
-      menu.setAttribute('role', 'listbox'); menu.setAttribute('aria-label', target.getAttribute('aria-label'));
+      menu.setAttribute('role', 'listbox');
+      menu.setAttribute('aria-label', target.getAttribute('aria-label') || target.labels?.[0]?.textContent.trim() || '');
       // Use the top layer to escape the animated filter container and sticky table headers.
       if (menu.showPopover) menu.setAttribute('popover', 'manual');
       doc.body.append(menu);
@@ -117,7 +126,7 @@ export function createCategoryFilterMenu({ document: doc = globalThis.document, 
           { duration: 180, easing: 'cubic-bezier(.22,1,.36,1)' });
       }
     }
-    query = search;
+    query = search; navigated = false;
     sync();
   }
 
@@ -156,20 +165,28 @@ export function createCategoryFilterMenu({ document: doc = globalThis.document, 
   };
   listen(doc, 'input', search);
   listen(doc, 'compositionend', search);
+  // Capture phase: an open list takes Enter and Escape before the field's own handlers (an editor's save or cancel,
+  // a dialog's close), so the first press only picks or closes the list.
   listen(doc, 'keydown', (event) => {
     const target = asInput(event.target);
     if (!target || event.isComposing || event.keyCode === 229) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (input !== target) open(target);
-      if (options.length) highlight(active < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1) :
-        (active + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length, true);
-    } else if (input === target && event.key === 'Enter' && options.length) {
-      event.preventDefault(); choose(options[active < 0 ? 0 : active]);
+      if (options.length) {
+        navigated = true;
+        highlight(active < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1) :
+          (active + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length, true);
+      }
+    } else if (input === target && event.key === 'Enter' && options.length && (!freeEntry() || navigated && options[active])) {
+      event.preventDefault(); event.stopPropagation?.();
+      choose(options[active < 0 ? 0 : active]);
     } else if (input === target && event.key === 'Escape') {
-      event.preventDefault(); close();
-    } else if (event.key === 'Tab') close();
-  });
+      // A list with nothing to show is invisible, so Escape goes on to the field (an editor cancels).
+      if (!blank) { event.preventDefault(); event.stopPropagation?.(); }
+      close();
+    } else if (event.key === 'Tab' || event.key === 'Enter') close();
+  }, true);
   listen(doc, 'scroll', schedulePosition, true);
   listen(win, 'resize', schedulePosition);
   listen(win.visualViewport, 'resize', schedulePosition);

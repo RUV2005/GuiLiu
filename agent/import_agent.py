@@ -140,7 +140,7 @@ def classification_text(value):
     # Exported product descriptions can embed order IDs even when ID columns are omitted.
     value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email]", value)
     value = re.sub(r"[A-Za-z]*\d{8,}[A-Za-z0-9]*", "[id]", value)
-    return re.sub(r"(?:CNY|RMB|JPY|[¥￥])\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:元|円)",
+    return re.sub(r"(?:CNY|RMB|JPY|USD|US\$|[¥￥$＄])\s*\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*(?:元|円|ドル|美元)",
                   "[amount]", value, flags=re.IGNORECASE)
 
 

@@ -32,9 +32,11 @@ export function currencyName(code) {
   const numeric = Number(raw);
   if (numeric === 101) return "JPY";
   if (numeric === 100 || numeric === 1 || numeric === 0) return "CNY";
+  if (numeric === 102) return "USD";
   const upper = raw.toUpperCase();
   if (upper === "JPY" || raw === "日元" || raw === "円") return "JPY";
   if (upper === "RMB" || upper === "CNY" || raw === "人民币" || raw === "元") return "CNY";
+  if (upper === "USD" || raw === "$" || raw === "美元" || raw === "ドル") return "USD";
   return upper || "-";
 }
 
@@ -44,6 +46,10 @@ export function exchangeRateToJpy(currency, rates = DEFAULT_RATES) {
   if (name === "CNY") {
     const rate = Number(rates.RMB || rates.CNY || DEFAULT_RATES.CNY);
     return Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_RATES.RMB;
+  }
+  if (name === "USD") {
+    const rate = Number(rates.USD || DEFAULT_RATES.USD);
+    return Number.isFinite(rate) && rate > 0 ? rate : DEFAULT_RATES.USD;
   }
   return null;
 }
@@ -375,7 +381,8 @@ export function monthlySeries(deals, rates, limit = 12) {
   const map = new Map();
   for (const deal of deals) {
     const key = monthKey(deal.ISOtime);
-    if (!key) continue;
+    // A broken time ("380", "11:39") parses as an ancient year; such a bill has no month to show.
+    if (!/^(19|20)\d{2}-\d{2}$/.test(key)) continue;
     map.set(key, (map.get(key) || 0) + amountToJpy(deal.price, deal.CurrencyTypeNumber, rates));
   }
   return [...map.entries()]
@@ -626,6 +633,9 @@ export function uniqueStrings(values) {
   }
   return result;
 }
+
+// The plus mark on page create actions (new transaction, account, task, goal), as the shell's icon set draws it.
+export const plusIcon = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>';
 
 export function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, Number(value)));

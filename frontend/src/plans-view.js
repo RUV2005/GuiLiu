@@ -1,4 +1,4 @@
-import { escapeHtml as h, escapeAttr as a } from './utils.js';
+import { escapeHtml as h, escapeAttr as a, plusIcon } from './utils.js';
 import { planForecastChart } from './plans-chart.js';
 import { financeAttr } from './finance-colors.js';
 import { createPlansState, displayCurrency, apiCurrency, japanDay, visiblePlan, PLAN_CURRENCIES } from './plans-model.js';
@@ -157,7 +157,8 @@ export function plansParts(ctx) {
 }
 export function plansView(ctx, { pageHeader }) {
   const parts = plansParts(ctx);
-  return '<section class="page goals-page plans-page" data-plans-root>' + pageHeader(ctx, '', 'goals', '', button(ctx, 'create', 'create')) +
+  return '<section class="page goals-page plans-page" data-plans-root>' + pageHeader(ctx, '', 'goals', '',
+    '<button type="button" class="button primary" data-plan-action="create" data-id="">' + plusIcon + h(tx(ctx, 'create')) + '</button>') +
     '<div data-plans-part="status">' + parts.status + '</div><div class="plans-layout">' +
     '<aside class="plans-list" aria-label="' + a(tx(ctx, 'all')) + '" data-plans-part="cards">' + parts.cards + '</aside>' +
     '<div class="plan-detail-pane" data-plans-part="detail">' + detail(ctx, parts.funding) + '</div></div>' +

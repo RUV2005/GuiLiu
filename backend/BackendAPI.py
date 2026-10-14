@@ -416,7 +416,7 @@ def create_import_router(db_path, agent_url):
     @router.post("/preview")
     async def preview(background: BackgroundTasks, file: UploadFile = File(...),
                       account_number: int = Form(...), preset_id: str | None = Form(None),
-                      timezone: str | None = Form(None), default_currency: Literal["CNY", "JPY"] | None = Form(None),
+                      timezone: str | None = Form(None), default_currency: Literal["CNY", "JPY", "USD"] | None = Form(None),
                       sheet_name: str | None = Form(None), use_agent: bool = Form(True)):
         try:
             content = await file.read(MAX_BYTES + 1)
@@ -495,7 +495,8 @@ class ADRresults_request_structure(BaseModel):
     MainCategory: str
     SubCategory: str
     DetailCategory: str | None = ""
-    AccountNumber: int
+    # Bills made from a receipt may have no account yet; their item lines keep none too.
+    AccountNumber: int | None = None
     SubDealingNumber: int
     price: float
     msgid: str | None = None

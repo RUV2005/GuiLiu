@@ -52,6 +52,7 @@ def connect(db_path):
 def ensure_status_table(db_path):
     with connect(db_path) as conn:
         DBmanage.ensure_mail_source_columns(conn)
+        DBmanage.ensure_adr_user_changes(conn)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS ADRMatchStatus (
                 DealingNumber INTEGER PRIMARY KEY REFERENCES DealingData(DealingNumber) ON DELETE CASCADE,
@@ -180,6 +181,7 @@ def save_items(db_path, dealing_number, token, revision, items, complete, source
             raise ValueError("ProductName and a positive Quantity are required")
         number(item["price"])
     with connect(db_path) as conn:
+        DBmanage.ensure_adr_user_changes(conn)
         conn.execute("BEGIN IMMEDIATE")
         state = conn.execute("SELECT * FROM ADRMatchStatus WHERE DealingNumber = ?", (dealing_number,)).fetchone()
         if token:
@@ -195,21 +197,32 @@ def save_items(db_path, dealing_number, token, revision, items, complete, source
         bill, existing = context["dealing_data"], context["existing_adr_results"]
         if any(not row.get("ProductName") for row in existing):
             raise ValueError("Existing legacy ADR rows require review before automatic enrichment")
+        # Lines the user deleted, and versions an edit replaced, are the user's decision: evidence that still lists
+        # them does not add them back, and lines the user edited are not expected to appear in the evidence.
+        removed = [dict(row) for row in conn.execute(
+            "SELECT ProductName, Quantity, price, ReplacedBy FROM ADRUserRemoved WHERE DealingNumber = ?", (dealing_number,))]
+        suppressed = Counter(item_key(row) for row in removed)
+        edited = {row["ReplacedBy"] for row in removed if row["ReplacedBy"] is not None}
         counts = Counter(item_key(row) for row in existing)
-        if complete and counts - Counter(item_key(row) for row in items):
+        if complete and Counter(item_key(row) for row in existing if row["SubDealingNumber"] not in edited) - Counter(item_key(row) for row in items):
             raise ValueError("Complete result conflicts with existing ADR items")
-        new_items = []
+        new_items, skipped = [], 0
         for item in items:
             key = item_key(item)
             if counts[key]:
                 counts[key] -= 1
+            elif suppressed[key]:
+                suppressed[key] -= 1
+                skipped += 1
             else:
                 new_items.append(item)
         total = sum((number(row["price"]) for row in existing + new_items), Decimal(0))
         paid = number(bill["price"])
         if paid < 0 or total < 0 or total > paid + Decimal("0.01"):
             raise ValueError("ADR item total conflicts with bill amount")
-        if complete and abs(total - paid) > Decimal("0.01"):
+        # After the user changed lines, their total may no longer be the bill amount; the evidence itself must be.
+        checked = sum((number(row["price"]) for row in items), Decimal(0)) if removed else total
+        if complete and abs(checked - paid) > Decimal("0.01"):
             raise ValueError("Complete item total does not reconcile with bill amount")
         next_number = max((int(row["SubDealingNumber"]) for row in existing), default=0)
         for offset, item in enumerate(new_items, 1):
@@ -240,8 +253,8 @@ def save_items(db_path, dealing_number, token, revision, items, complete, source
                 INSERT INTO ADRMatchStatus (DealingNumber, Matched) VALUES (?, 1)
                 ON CONFLICT(DealingNumber) DO UPDATE SET Matched = 1
             """, (dealing_number,))
-        log.info("ADR commit bill=%s source=%s inserted=%s", dealing_number, source_id or "scheduled", len(new_items))
-    return {"saved_count": len(new_items), "already_completed": not new_items}
+        log.info("ADR commit bill=%s source=%s inserted=%s kept_removed=%s", dealing_number, source_id or "scheduled", len(new_items), skipped)
+    return {"saved_count": len(new_items), "already_completed": not new_items, "skipped_user_removed": skipped}
 
 
 class ADRScheduler:

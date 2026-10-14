@@ -30,7 +30,7 @@ export function candidateRowMarkup(source, saved, accounts, t) {
         <div data-candidate-existing>${select(t('selectAccount'), 'account_number', option('', t('selectAccount'), !d.account_number)
           + eligible.map(a => option(a.account_number, `${a.name} · ${setupCurrency(a.currency)}`, String(a.account_number) === String(d.account_number))).join(''))}</div></td>
       ${newCell(select(t('account_type'), 'account_type', option('', t('notFilled'), !d.account_type) + ['bank', 'credit'].map(type => option(type, t(type), type === d.account_type)).join('')), 'account_type')}
-      ${newCell(select(t('currency'), 'currency', option('', t('notFilled'), !d.currency) + ['JPY', 'CNY'].map(c => option(c, c, c === d.currency)).join('')), 'currency')}
+      ${newCell(select(t('currency'), 'currency', option('', t('notFilled'), !d.currency) + ['JPY', 'CNY', 'USD'].map(c => option(c, c, c === d.currency)).join('')), 'currency')}
       ${newCell(balanceInput(d.opening_balance, d.account_type === 'credit', t), 'balance')}
       ${newCell(`<div data-candidate-credit>${input('credit_limit', 'inputmode="decimal"')}</div>`, 'credit_limit')}
       <td><div data-candidate-ref>${input('account_ref', 'maxlength="80"')}</div></td>

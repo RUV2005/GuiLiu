@@ -110,7 +110,9 @@ export function patchHistoryControls(ctx, root = document) {
       .find(name => focus?.hasAttribute(name));
     const top = node.querySelector('.agent-session-list')?.scrollTop;
     node.innerHTML = markup; node.dataset.markup = markup;
-    if (top != null && node.querySelector('.agent-session-list')) node.querySelector('.agent-session-list').scrollTop = top;
+    // A list that was already open keeps its place and does not replay the opening motion.
+    const list = node.querySelector('.agent-session-list');
+    if (top != null && list) { list.classList.add('is-settled'); list.scrollTop = top; }
     const input = node.querySelector('[data-agent-title-input]');
     if (input) { input.focus({ preventScroll: true }); input.select(); }
     else if (renameId) [...node.querySelectorAll('[data-agent-rename-session]')].find(button => button.dataset.agentRenameSession === renameId && button.dataset.agentRenamePlace === renamePlace)?.focus({ preventScroll: true });

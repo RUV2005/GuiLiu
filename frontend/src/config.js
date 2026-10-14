@@ -39,10 +39,12 @@ export const STORAGE = {
   editHistory: "abk-editorial-edit-history",
 };
 
+// Yen per unit, used until a live quote arrives (then marked as a reference rate).
 export const DEFAULT_RATES = {
   JPY: 1,
   RMB: 23.49,
   CNY: 23.49,
+  USD: 150,
   updatedAt: "",
   source: "fallback",
 };

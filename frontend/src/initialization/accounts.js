@@ -5,7 +5,7 @@ export const setupCurrency = value => clean(value).toUpperCase() === 'RMB' ? 'CN
 export function accountPayload(kind, fields, account, accounts = [], now = Date.now()) {
   if (!['create', 'update', 'calibrate'].includes(kind) || (kind !== 'create' && !account)) throw new Error('accountInvalid');
   const currency = setupCurrency(kind === 'create' ? fields.currency : account.currency);
-  if (!['JPY', 'CNY'].includes(currency)) throw new Error('accountInvalid');
+  if (!['JPY', 'CNY', 'USD'].includes(currency)) throw new Error('accountInvalid');
   const amount = (value, options) => {
     try { return decimalAmount(value, currency, options); } catch { throw new Error('amountPrecision'); }
   };

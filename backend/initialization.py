@@ -82,7 +82,7 @@ def bank_transaction_sample(decision, mail):
     return (decision.get("is_bank") is True
             and not is_cash_withdrawal(text)
             and decision.get("mail_type") in {"debit", "repayment", "credit"}
-            and decision.get("currency") in {"JPY", "CNY"}
+            and decision.get("currency") in {"JPY", "CNY", "USD"}
             and all(decision.get(key, "").strip() and decision[key] in text
                     for key in ("identity_quote", "amount_quote", "transaction_time_quote", "transaction_quote")))
 

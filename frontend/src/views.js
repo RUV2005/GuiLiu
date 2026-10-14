@@ -18,6 +18,7 @@ import { fullMailImportView } from './full-mail-import-view.js';
 import { shutdownSettingsView } from './system-shutdown.js';
 import { settingsSaveView } from './settings-save.js';
 import { reportScopeView, reportAccountLabel, comparisonLabels } from './report-scope.js';
+import { TRANSACTION_PERIODS, activeTransactionFilters, transactionAccount } from './ledger-model.js';
 import { PRIMARY_CURRENCIES, normalizePrimaryCurrency } from './config.js';
 import { assetsView, assetModalContent } from './assets-view.js';
 import { INITIAL_TRANSACTION_ROWS, ESTIMATED_TRANSACTION_HEIGHT, transactionAdrState, todayTransactionDeals } from './ledger-model.js';
@@ -184,7 +185,8 @@ export function appShell(ctx) {
   );
 }
 
-function searchResults(ctx) {
+// Results under the dock search field. main.js patches them in place on every keystroke.
+export function searchResults(ctx) {
   const query = String(ctx.state.globalSearch || "").trim().toLowerCase();
   if (!query) return "";
   const routeMatches = [
@@ -200,12 +202,13 @@ function searchResults(ctx) {
   ]
     .filter(([, key]) => text(ctx, key).toLowerCase().includes(query))
     .slice(0, 3);
-  const dealMatches = ctx.state.deals
-    .filter((deal) => {
-      return String(deal.DealingNumber).includes(query) || String(deal.ShopName || "").toLowerCase().includes(query);
-    })
-    .slice(0, 5);
-  if (!routeMatches.length && !dealMatches.length) return "";
+  const allDeals = ctx.state.deals.filter((deal) => {
+    return String(deal.DealingNumber).includes(query) || String(deal.ShopName || "").toLowerCase().includes(query);
+  });
+  const dealMatches = allDeals.slice(0, 5);
+  if (!routeMatches.length && !dealMatches.length) {
+    return '<div class="search-popover"><p class="search-empty" role="status">' + escapeHtml(text(ctx, "noRows")) + "</p></div>";
+  }
   return (
     '<div class="search-popover">' +
     routeMatches.map(([route, key]) =>
@@ -217,6 +220,8 @@ function searchResults(ctx) {
       escapeHtml(deal.DealingNumber) + " · " + escapeHtml(formatDealAmount(deal.price, deal.CurrencyTypeNumber, ctx.language, ctx.state.rates)) +
       "</small></span></button>",
     ).join("") +
+    (allDeals.length > dealMatches.length ? '<button type="button" class="search-all" data-search-all>' + icon("arrow") + '<span>' +
+      escapeHtml(text(ctx, "searchAllDeals")) + "</span></button>" : "") +
     "</div>"
   );
 }
@@ -356,13 +361,14 @@ function transactionsView(ctx) {
     ) +
     '<section class="ledger-toolbar"><div class="ledger-search">' + icon("search") +
     '<input type="search" data-filter="shop" value="' + escapeAttr(filters.shop) + '" placeholder="' +
-    escapeAttr(text(ctx, "merchant")) + '" /></div>' +
+    escapeAttr(text(ctx, "merchant")) + '" aria-label="' + escapeAttr(text(ctx, "merchant")) + '" /></div>' +
     '<button class="button filter-toggle" type="button" data-toggle-filters aria-controls="transaction-filters" aria-expanded="' +
     String(ctx.state.filtersOpen) + '">' + icon("filter") + escapeHtml(text(ctx, "filters")) +
     '<span class="filter-count">' + escapeHtml(ctx.activeFilterCount) + "</span>" + icon("chevron") + "</button>" +
     correctionSwitch +
     '<div data-ledger-selection>' + transactionSelection(ctx) + '</div>' +
     "</section>" +
+    '<div data-ledger-active-filters>' + transactionActiveFilters(ctx) + '</div>' +
     '<div data-ledger-filters>' + (ctx.state.filtersOpen ? transactionFilters(ctx) : '') + '</div>' +
     '<section class="ledger-section"><div class="ledger-meta"><span>' +
     escapeHtml(ctx.filteredDeals.length + " / " + ctx.state.deals.length) + "</span><strong>" +
@@ -387,39 +393,85 @@ export function transactionSelection(ctx) {
     (ctx.state.dealDrafts?.size ? ' disabled' : '') + '>' + icon('trash') + escapeHtml(text(ctx, 'deleteSelected')) + '</button></div>' : '';
 }
 
+// Accounts to filter by: every saved account, any other account a bill names, and bills with no account.
+function accountFilterValues(ctx) {
+  const selected = String(ctx.state.transactionFilters.account || '');
+  const saved = (ctx.state.assets?.accounts || []).map(account => String(account.account_number));
+  const used = new Set((ctx.state.deals || []).map(transactionAccount));
+  return [...new Set([...saved, ...[...used].filter(value => value !== 'none').sort((a, b) => Number(a) - Number(b)),
+    ...(used.has('none') ? ['none'] : []), ...(selected ? [selected] : [])])];
+}
+const accountFilterLabel = (ctx, value) => value === 'none' ? text(ctx, 'noAccount') : reportAccountLabel(ctx, value);
+
+function accountFilter(ctx) {
+  const selected = String(ctx.state.transactionFilters.account || '');
+  const label = text(ctx, 'account');
+  return '<label><span>' + escapeHtml(label) + '</span><span class="filter-select"><select data-filter="account" aria-label="' +
+    escapeAttr(label) + '"><option value=""' + (selected ? '' : ' selected') + '>' + escapeHtml(text(ctx, 'allAccounts')) + '</option>' +
+    accountFilterValues(ctx).map(value => '<option value="' + escapeAttr(value) + '"' + (value === selected ? ' selected' : '') + '>' +
+      escapeHtml(accountFilterLabel(ctx, value)) + '</option>').join('') + '</select>' + icon('chevron') + '</span></label>';
+}
+
+// Free-entry fields (the transaction dialog) open the same suggestion menu as the filters; any new text is kept.
+const suggestAttrs = list => ' data-category-list="' + list + '" data-category-entry="free" role="combobox" aria-autocomplete="list"' +
+  ' aria-haspopup="listbox" aria-expanded="false" autocomplete="off"';
+
 function categoryFilter(ctx, field, list) {
   const label = text(ctx, field);
   return '<label><span>' + escapeHtml(label) + '</span><span class="category-filter-control">' +
     '<input type="search" data-category-list="' + list + '" data-filter="' + field + '" value="' +
     escapeAttr(ctx.state.transactionFilters[field]) + '" role="combobox" aria-autocomplete="list" aria-haspopup="listbox"' +
     ' aria-expanded="false" aria-label="' + escapeAttr(label) + '" data-empty-label="' + escapeAttr(text(ctx, 'noRows')) +
-    '" autocomplete="off" spellcheck="false" />' + icon('chevron') + '</span></label>';
+    '" placeholder="' + escapeAttr(text(ctx, 'anyCategory')) + '" autocomplete="off" spellcheck="false" />' + icon('chevron') + '</span></label>';
 }
 
+const PERIOD_LABELS = { '': 'periodAll', 'this-month': 'periodThisMonth', 'last-month': 'periodLastMonth',
+  'last-3-months': 'periodLast3Months', 'this-year': 'periodThisYear', custom: 'periodCustom' };
+// A period set only by dates (older saved state) shows as Custom.
+export const transactionPeriod = filters => filters.period || (filters.startDate || filters.endDate ? 'custom' : '');
+
+// The filter card: when (a period switch, dates only for Custom), then account and categories in one row.
 export function transactionFilters(ctx) {
-  const filters = ctx.state.transactionFilters;
+  const filters = ctx.state.transactionFilters, period = transactionPeriod(filters);
   const mainOptions = ctx.categoryOptions.map((item) => '<option value="' + escapeAttr(item) + '"></option>').join("");
   const subOptions = ctx.subcategoryOptions.map((item) => '<option value="' + escapeAttr(item) + '"></option>').join("");
+  const periods = ['', ...TRANSACTION_PERIODS].map(value => '<button type="button" data-transaction-period="' + value + '" aria-pressed="' +
+    String(value === period) + '"' + (value === period ? ' class="is-active"' : '') + '>' + escapeHtml(text(ctx, PERIOD_LABELS[value])) + '</button>').join('');
+  const active = activeTransactionFilters(filters).length > 0;
   return (
-    '<section class="filter-panel" id="transaction-filters" aria-label="' + escapeAttr(text(ctx, "filters")) + '">' +
-    '<div class="filter-panel-header"><label class="filter-id"><span>' + escapeHtml(text(ctx, "id")) +
-    '</span><input type="search" data-filter="id" value="' + escapeAttr(filters.id) + '" placeholder="#22437" /></label>' +
-    '<button class="button ghost" type="button" data-clear-filters>' + icon("reset") +
+    '<div class="filter-card-wrap"><section class="filter-panel filter-card" id="transaction-filters" aria-label="' + escapeAttr(text(ctx, "filters")) + '">' +
+    '<div class="filter-period-row"><span class="filter-row-label">' + escapeHtml(text(ctx, 'date')) + '</span>' +
+    '<div class="segmented-control filter-periods" role="group" aria-label="' + escapeAttr(text(ctx, 'date')) + '">' + periods + '</div>' +
+    '<div class="filter-custom-dates" data-filter-custom-dates' + (period === 'custom' ? '' : ' hidden') + '>' +
+    '<input type="date" data-filter="startDate" value="' + escapeAttr(filters.startDate) + '" aria-label="' + escapeAttr(text(ctx, 'startDate')) + '" />' +
+    '<span aria-hidden="true">–</span>' +
+    '<input type="date" data-filter="endDate" value="' + escapeAttr(filters.endDate) + '" aria-label="' + escapeAttr(text(ctx, 'endDate')) + '" /></div>' +
+    '<button class="button ghost filter-reset" type="button" data-clear-filters' + (active ? '' : ' hidden') + '>' + icon("reset") +
     escapeHtml(text(ctx, "clearFilters")) + '</button></div>' +
-    '<div class="filter-groups"><fieldset class="filter-group"><legend>' + escapeHtml(text(ctx, "category")) +
-    '</legend><div class="filter-pair">' +
+    '<div class="filter-fields">' + accountFilter(ctx) +
     categoryFilter(ctx, 'mainCategory', 'main-category-options') +
-    categoryFilter(ctx, 'subCategory', 'sub-category-options') +
-    '</div></fieldset><fieldset class="filter-group"><legend>' + escapeHtml(text(ctx, "date")) +
-    '</legend><div class="filter-pair">' +
-    '<label><span>' + escapeHtml(text(ctx, "startDate")) + '</span><input type="date" data-filter="startDate" value="' +
-    escapeAttr(filters.startDate) + '" /></label>' +
-    '<label><span>' + escapeHtml(text(ctx, "endDate")) + '</span><input type="date" data-filter="endDate" value="' +
-    escapeAttr(filters.endDate) + '" /></label>' +
-    '</div></fieldset></div>' +
+    categoryFilter(ctx, 'subCategory', 'sub-category-options') + '</div>' +
     '<datalist id="main-category-options">' + mainOptions + '</datalist><datalist id="sub-category-options">' +
-    subOptions + "</datalist></section>"
+    subOptions + "</datalist></section></div>"
   );
+}
+
+// While the card is closed, what is in effect stays visible as tokens that each remove one condition.
+export function transactionActiveFilters(ctx) {
+  if (ctx.state.filtersOpen) return '';
+  const filters = ctx.state.transactionFilters, period = transactionPeriod(filters);
+  const dates = [filters.startDate, filters.endDate].map(value => value ? value.replaceAll('-', '/') : '…').join(' – ');
+  const labels = {
+    period: period === 'custom' ? dates : text(ctx, PERIOD_LABELS[period] || 'periodCustom'),
+    account: filters.account ? accountFilterLabel(ctx, String(filters.account)) : '',
+    mainCategory: filters.mainCategory, subCategory: filters.subCategory,
+  };
+  const keys = activeTransactionFilters(filters).filter(key => key !== 'shop');
+  if (!keys.length) return '';
+  return '<div class="ledger-active-filters" role="group" aria-label="' + escapeAttr(text(ctx, 'activeFilters')) + '">' +
+    keys.map(key => '<button type="button" class="filter-token" data-clear-filter="' + key + '" aria-label="' +
+      escapeAttr(text(ctx, 'removeFilter', { filter: labels[key] })) + '"><span>' + escapeHtml(labels[key]) + '</span>' + icon('close') + '</button>').join('') +
+    '<button type="button" class="filter-token-clear" data-clear-filters>' + escapeHtml(text(ctx, 'clearAll')) + '</button></div>';
 }
 
 export function transactionEditActions(ctx, id, saving) {
@@ -466,7 +518,7 @@ export function transactionEmptyRow(ctx) {
 export function transactionRows(ctx, deal, { readOnly = false } = {}) {
   const id = String(deal.DealingNumber);
   const selected = !readOnly && ctx.state.selectedDeals.has(id);
-  const adr = transactionAdrView(ctx, deal);
+  const adr = transactionAdrView(ctx, deal, { readOnly });
   const categories = [deal.MainCategory, deal.SubCategory].filter((value) => String(value || "").trim());
   const fieldAction = field => readOnly ? ' data-open-deal="' + escapeAttr(id) + '"' :
     ' data-edit-deal="' + escapeAttr(id) + '" data-field="' + field + '"';
@@ -476,7 +528,7 @@ export function transactionRows(ctx, deal, { readOnly = false } = {}) {
     '<td class="check-cell">' + (readOnly ? '' : '<input type="checkbox" data-select-deal="' + escapeAttr(id) + '"' + (selected ? " checked" : "") + ' />') + '</td>' +
     '<td class="merchant-cell"><div class="merchant-content"><span class="adr-disclosure">' + adr.disclosure +
     '</span>' + transactionCategoryIcon(deal, ctx.state.categoryIcons, ctx.language) + '<button type="button" class="editable-value merchant-value"' +
-    fieldAction('ShopName') + '>' + escapeHtml(deal.ShopName || "—") + "</button></div></td>" +
+    fieldAction('ShopName') + ' title="' + escapeAttr(deal.ShopName || "—") + '">' + escapeHtml(deal.ShopName || "—") + "</button></div></td>" +
     '<td class="amount-cell"><button type="button" class="editable-value numeric"' +
     fieldAction('price') + financeAttr(deal.price, 'amount') + transactionAmountAttrs(ctx, deal.price, deal.CurrencyTypeNumber) + '>' +
     escapeHtml(formatAmount(deal.price, deal.CurrencyTypeNumber, ctx.language)) +
@@ -501,7 +553,10 @@ export function transactionRows(ctx, deal, { readOnly = false } = {}) {
   return main + adr.details;
 }
 
-export function transactionAdrView(ctx, deal) {
+// An item line's draft key: adr:<bill>:<item number>.
+export const adrDraftId = (deal, row) => 'adr:' + String(deal.DealingNumber) + ':' + String(row.SubDealingNumber);
+
+export function transactionAdrView(ctx, deal, { readOnly = false } = {}) {
   const id = String(deal.DealingNumber);
   const { rows, loading, expandable, expanded } = transactionAdrState(ctx.state, deal);
   const source = rows.length ? "ADR " + rows.length : dealHasAdr(deal) ? "ADR" : "AUTO";
@@ -513,23 +568,34 @@ export function transactionAdrView(ctx, deal) {
     escapeAttr(id) + '" aria-expanded="' + String(expanded) + '"' + (expanded ? ' aria-controls="' + escapeAttr(detailIds.join(' ')) + '"' : '') +
     ' aria-label="' + escapeAttr(label) + '" title="' + escapeAttr(label) + '">' + icon("chevron") + "</button>";
   if (!expanded) return { expandable, expanded, source, disclosure, details: '' };
-  const detailStart = (index, last) => '<tr class="adr-detail-row' + (last ? ' is-last' : '') + '" id="' +
-    escapeAttr(detailIds[index]) + '" data-adr-row-for="' + escapeAttr(id) + '"' + (expanded ? '' : ' hidden') + '>';
+  const detailStart = (index, last, draft = '') => '<tr class="adr-detail-row' + (last ? ' is-last' : '') + '" id="' +
+    escapeAttr(detailIds[index]) + '" data-adr-row-for="' + escapeAttr(id) + '"' + (draft ? ' data-adr-draft-row="' + escapeAttr(draft) + '"' : '') +
+    (expanded ? '' : ' hidden') + '>';
   const details = rows.length ? rows.map((row, index) => {
     const product = row.ProductName || row.ShopName || "—";
     const quantity = row.Quantity ?? row.quantity;
-    return detailStart(index, index === rows.length - 1) +
-      '<td class="adr-gutter"></td><td class="adr-product-cell"><span class="adr-product">' +
-      escapeHtml(product) + '</span></td><td class="adr-amount-cell"><strong class="adr-amount"' + financeAttr(row.price, 'amount') +
-      transactionAmountAttrs(ctx, row.price, row.CurrencyTypeNumber ?? deal.CurrencyTypeNumber) + '>' +
-      escapeHtml(formatAmount(row.price, row.CurrencyTypeNumber ?? deal.CurrencyTypeNumber, ctx.language)) +
-      '</strong></td><td class="adr-quantity-cell">' +
-      (quantity !== null && quantity !== undefined && quantity !== ''
-        ? '<span class="adr-quantity"><span>' + escapeHtml(text(ctx, "quantity")) + '</span><strong>' + escapeHtml(quantity) + '</strong></span>'
-        : '') + '</td><td class="category-cell"><div class="category-pair">' +
-      [row.MainCategory, row.SubCategory].filter(Boolean).map((category) =>
-        '<span class="category-tag">' + escapeHtml(category) + '</span>',
-      ).join('') + '</div></td><td></td></tr>';
+    const hasQuantity = quantity !== null && quantity !== undefined && quantity !== '';
+    // Item lines with a number can be edited in place; read-only lists (today's orders) keep plain text.
+    const draft = !readOnly && row.SubDealingNumber != null ? adrDraftId(deal, row) : '';
+    const cell = (tag, field, className, content) => draft
+      ? '<button type="button" class="editable-value ' + className + '" data-edit-deal="' + escapeAttr(draft) + '" data-field="' + field + '"' + tag + '>' + content + '</button>'
+      : '<' + (field === 'price' ? 'strong' : 'span') + ' class="' + className + '"' + tag + '>' + content + '</' + (field === 'price' ? 'strong' : 'span') + '>';
+    const categories = [['MainCategory', row.MainCategory], ['SubCategory', row.SubCategory]];
+    return detailStart(index, index === rows.length - 1, draft) +
+      '<td class="adr-gutter"></td><td class="adr-product-cell">' + cell(' title="' + escapeAttr(product) + '"', 'ProductName', 'adr-product', escapeHtml(product)) +
+      '</td><td class="adr-amount-cell">' + cell(financeAttr(row.price, 'amount') +
+      transactionAmountAttrs(ctx, row.price, row.CurrencyTypeNumber ?? deal.CurrencyTypeNumber), 'price', draft ? 'adr-amount numeric' : 'adr-amount',
+      escapeHtml(formatAmount(row.price, row.CurrencyTypeNumber ?? deal.CurrencyTypeNumber, ctx.language))) +
+      '</td><td class="adr-quantity-cell">' +
+      (hasQuantity || draft ? cell('', 'Quantity', 'adr-quantity', '<span>' + escapeHtml(text(ctx, "quantity")) + '</span><strong>' +
+        escapeHtml(hasQuantity ? quantity : '—') + '</strong>') : '') + '</td><td class="category-cell"><div class="category-pair">' +
+      (draft
+        ? categories.map(([field, value]) => '<button type="button" class="category-tag' + (value ? '' : ' is-missing') + '" data-edit-deal="' +
+          escapeAttr(draft) + '" data-field="' + field + '">' + escapeHtml(value || (field === 'MainCategory' ? text(ctx, 'missingClassification') : '—')) + '</button>').join('')
+        : categories.filter(([, value]) => value).map(([, value]) => '<span class="category-tag">' + escapeHtml(value) + '</span>').join('')) +
+      '</div></td><td' + (draft ? ' class="action-cell"' : '') + '>' + (draft ? '<div class="row-actions"><button class="button compact ghost icon-only danger-quiet" type="button" data-delete-adr="' +
+        escapeAttr(draft) + '" aria-label="' + escapeAttr(text(ctx, 'deleteItem') + ' · ' + product) + '" title="' + escapeAttr(text(ctx, 'deleteItem')) + '">' +
+        icon('trash') + '</button></div>' : '') + '</td></tr>';
   }).join('') : detailStart(0, true) + '<td class="adr-gutter"></td><td colspan="5" class="adr-product-cell">' +
     '<span class="adr-empty" role="status">' + escapeHtml(loading ? text(ctx, "loading") : ctx.state.adrSyncError || text(ctx, "noAdrDetails")) + '</span></td></tr>';
   return { expandable, expanded, source, disclosure, details };
@@ -603,7 +669,7 @@ function insightsView(ctx) {
   const mainChart = overviewChartView(ctx);
   return (
     '<section class="page insights-page">' +
-    pageHeader(ctx, "insightsKicker", "insightsTitle", brief, "") +
+    pageHeader(ctx, "insightsKicker", summary.titleKey || "overviewTitleOnTrack", brief, "") +
     reportScopeView(ctx) + '<div class="insight-summary"><div><span>' + escapeHtml(labels.current) + '</span><strong>' +
     escapeHtml(formatJpy(summary.currentTotal, ctx.language)) + '</strong></div><div><span>' +
     escapeHtml(labels.previous) + '</span><strong>' + escapeHtml(summary.previousCount ? formatJpy(summary.previousTotal, ctx.language) : '—') +
@@ -623,7 +689,7 @@ function insightsView(ctx) {
     escapeHtml(text(ctx, "monthlyAverage")) + '</span><strong>' +
     escapeHtml(formatJpy(ctx.monthlyAverage, ctx.language)) + '</strong></div></header><p class="report-scope">' +
     escapeHtml(text(ctx, 'allTime') + ' · ' + reportAccountLabel(ctx) + ' · ' + text(ctx, 'spendingCurrency')) + '</p><div class="monthly-history-scroll">' +
-    horizontalBars(ctx.monthlyTotals, { language: ctx.language, limit: 60, motionKey: 'insights-months' }) + "</div></section>" +
+    horizontalBars(ctx.monthlyTotals.slice().reverse(), { language: ctx.language, limit: 60, motionKey: 'insights-months' }) + "</div></section>" +
     '<section class="editorial-section evidence-section"><details><summary>' + escapeHtml(text(ctx, "evidence")) +
     icon("chevron") + '</summary><dl><div><dt>' + escapeHtml(text(ctx, "evidenceRange")) + "</dt><dd>" +
     escapeHtml(ctx.summary.rangeLabel) + '</dd></div><div><dt>' + escapeHtml(text(ctx, "evidenceCurrency")) +
@@ -925,24 +991,24 @@ function transactionModal(ctx, data = {}) {
   const categories = ctx.categoryOptions.map((item) => '<option value="' + escapeAttr(item) + '"></option>').join("");
   const subs = ctx.subcategoryOptions.map((item) => '<option value="' + escapeAttr(item) + '"></option>').join("");
   return (
-    modalHeader(ctx, "TRANSACTION", editing ? text(ctx, "edit") : text(ctx, "addTransaction"), "") +
-    '<form class="modal-form" data-create-transaction' + (editing ? ' data-edit-id="' + escapeAttr(data.DealingNumber) + '"' : "") + '><label class="field"><span>' +
+    modalHeader(ctx, text(ctx, "transactions"), editing ? text(ctx, "edit") : text(ctx, "addTransaction"), "") +
+    '<form class="modal-form" data-create-transaction' + (editing ? ' data-edit-id="' + escapeAttr(data.DealingNumber) + '"' : "") +
+    (editing || data.ISOtime ? "" : ' data-opened-at="' + escapeAttr(new Date().toISOString()) + '"') + '><label class="field"><span>' +
     escapeHtml(text(ctx, "merchant")) + '</span><input name="shop_name" value="' + escapeAttr(data.ShopName || "") +
     '" required autofocus /></label><label class="field"><span>' + escapeHtml(text(ctx, "amount")) +
     '</span><input type="number" step="0.01" name="price" value="' + escapeAttr(data.price || "") +
-    '" required /></label><label class="field"><span>Currency</span><select name="CurrencyTypeNumber">' +
+    '" required /></label><label class="field"><span>' + escapeHtml(text(ctx, "assetCurrency")) + '</span><select name="CurrencyTypeNumber">' +
     option("101", "JPY", data.CurrencyTypeNumber || 101) + option("100", "CNY", data.CurrencyTypeNumber || 101) +
+    option("102", "USD", data.CurrencyTypeNumber || 101) +
     '</select></label><label class="field"><span>' + escapeHtml(text(ctx, "date")) +
     '</span><input type="datetime-local" name="isotime" value="' +
     escapeAttr(datetimeInputValue(data.ISOtime || new Date())) + '" required /></label><label class="field"><span>' +
-    escapeHtml(text(ctx, "mainCategory")) + '</span><input list="modal-main-categories" name="main_category" value="' +
+    escapeHtml(text(ctx, "mainCategory")) + '</span><input' + suggestAttrs('modal-main-categories') + ' name="main_category" value="' +
     escapeAttr(data.MainCategory || "") + '" /></label><label class="field"><span>' +
-    escapeHtml(text(ctx, "subCategory")) + '</span><input list="modal-sub-categories" name="sub_category" value="' +
+    escapeHtml(text(ctx, "subCategory")) + '</span><input' + suggestAttrs('modal-sub-categories') + ' name="sub_category" value="' +
     escapeAttr(data.SubCategory || "") + '" /></label><label class="field"><span>' +
-    escapeHtml(text(ctx, "account")) + '</span><input name="AccountNumber" list="transaction-account-options" value="' +
-    escapeAttr(data.AccountNumber || (ctx.state.settings.contextAccount === "all" ? "" : ctx.state.settings.contextAccount)) +
-    '" /></label><datalist id="transaction-account-options">' + ctx.state.assets.accounts.map((account) => '<option value="' + account.account_number + '">' + escapeHtml(account.name + ' · ' + account.currency) + '</option>').join('') +
-    '</datalist><label class="field"><span>' + escapeHtml(text(ctx, 'assetSettled')) + '</span><input name="settled_amount" inputmode="decimal" /><small>' +
+    escapeHtml(text(ctx, "account")) + '</span><select name="AccountNumber">' + dialogAccountOptions(ctx, data, editing) +
+    '</select></label><label class="field"><span>' + escapeHtml(text(ctx, 'assetSettled')) + '</span><input name="settled_amount" inputmode="decimal" /><small>' +
     escapeHtml(text(ctx, 'assetSettlementHint')) + '</small></label><datalist id="modal-main-categories">' + categories +
     '</datalist><datalist id="modal-sub-categories">' + subs +
     '</datalist><footer><button class="button" type="button" data-close-modal>' + escapeHtml(text(ctx, "cancel")) +
@@ -951,17 +1017,27 @@ function transactionModal(ctx, data = {}) {
   );
 }
 
+// The dialog lists accounts by name: no account, every saved account, and the bill's own account if none describes it.
+function dialogAccountOptions(ctx, data, editing) {
+  // An edited bill keeps its own account, none included; a new one starts from the account the app is scoped to.
+  const fallback = ctx.state.settings.contextAccount === "all" ? "" : ctx.state.settings.contextAccount;
+  const current = String((editing ? data.AccountNumber : data.AccountNumber || fallback) ?? "");
+  const saved = ctx.state.assets.accounts.map((account) => String(account.account_number));
+  const values = ["", ...saved, ...(current && !saved.includes(current) ? [current] : [])];
+  return values.map((value) => option(value, value ? reportAccountLabel(ctx, value) : text(ctx, "noAccount"), current)).join("");
+}
+
 function dealDetailModal(ctx, deal) {
   if (!deal) return "";
   const history = ctx.state.editHistory[String(deal.DealingNumber)] || [];
   const adrRows = ctx.state.adrByDeal[String(deal.DealingNumber)] || [];
   return (
-    modalHeader(ctx, "TRANSACTION / #" + deal.DealingNumber, deal.ShopName || "—", "") +
+    modalHeader(ctx, text(ctx, "transactions"), deal.ShopName || "—", "") +
     '<div class="detail-sections"><section><p class="section-label">' + escapeHtml(text(ctx, "normalizedData")) +
     '</p><dl class="detail-grid">' + detailItem(ctx, "date", formatDateTime(deal.ISOtime, ctx.language)) +
     '<div><dt>' + escapeHtml(text(ctx, 'amount')) + '</dt><dd><span' + transactionAmountAttrs(ctx, deal.price, deal.CurrencyTypeNumber) + '>' +
     escapeHtml(formatAmount(deal.price, deal.CurrencyTypeNumber, ctx.language)) + '</span></dd></div>' +
-    detailItem(ctx, "account", "#" + deal.AccountNumber) + detailItem(ctx, "id", "#" + deal.DealingNumber) +
+    detailItem(ctx, "account", accountFilterLabel(ctx, transactionAccount(deal))) + detailItem(ctx, "id", "#" + deal.DealingNumber) +
     "</dl></section><section><p class=\"section-label\">" + escapeHtml(text(ctx, "classification")) +
     '</p><div class="category-pair">' + [deal.MainCategory, deal.SubCategory, deal.DetailCategory].filter(Boolean).map((item) =>
       '<span class="category-tag">' + escapeHtml(item) + "</span>",
@@ -988,7 +1064,7 @@ function detailItem(ctx, key, value) {
 function goalModal(ctx, goal = {}) {
   goal = goal ?? {};
   return (
-    modalHeader(ctx, "GOAL", goal.id ? text(ctx, "edit") : text(ctx, "newGoal"), "") +
+    modalHeader(ctx, text(ctx, "goals"), goal.id ? text(ctx, "edit") : text(ctx, "newGoal"), "") +
     '<form class="modal-form" data-goal-form><input type="hidden" name="id" value="' + escapeAttr(goal.id || "") +
     '" /><label class="field full"><span>' + escapeHtml(text(ctx, "goalName")) +
     '</span><input name="name" value="' + escapeAttr(goal.name || "") + '" required autofocus /></label>' +
@@ -1011,7 +1087,7 @@ function goalModal(ctx, goal = {}) {
 
 function merchantMapModal(ctx, title) {
   return (
-    modalHeader(ctx, "REVIEW", text(ctx, "mapMerchant"), title) +
+    modalHeader(ctx, text(ctx, "review"), text(ctx, "mapMerchant"), title) +
     '<form class="modal-form" data-merchant-map-form><input type="hidden" name="unknown" value="' +
     escapeAttr(title) + '" /><label class="field"><span>' + escapeHtml(text(ctx, "key")) +
     '</span><input name="key" value="' + escapeAttr(title) + '" required /></label><label class="field"><span>' +

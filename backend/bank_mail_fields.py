@@ -52,7 +52,8 @@ def normalize_fields(fields, default_currency):
     code = unicodedata.normalize("NFKC", str(fields.get("currency", default_currency))).strip()
     if code == "¥":
         code = default_currency
-    code = {"円": "JPY", "元": "CNY", "圆": "CNY", "人民幣": "CNY", "人民币": "CNY"}.get(code, code)
+    code = {"円": "JPY", "元": "CNY", "圆": "CNY", "人民幣": "CNY", "人民币": "CNY",
+            "$": "USD", "US$": "USD", "USD$": "USD", "ドル": "USD", "米ドル": "USD", "美元": "USD", "美金": "USD"}.get(code, code)
     result["currency"] = assets.currency(code)
     if fields.get("amount"):
         value = unicodedata.normalize("NFKC", fields["amount"]).strip()

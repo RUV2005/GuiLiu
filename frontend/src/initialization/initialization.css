@@ -215,11 +215,11 @@
 :root:not([data-theme="light"]) .setup-provider[data-setup-provider="embedding"] img { filter: invert(1); }
 .setup-provider-toggle:hover, .setup-provider-toggle[aria-expanded="true"] { background: var(--surface-2); border-color: var(--ink-soft); }
 .setup-provider:has([aria-expanded="true"]) { z-index: 3; }
-.setup-provider-menu { position: absolute; top: calc(100% + 8px); left: 0; width: 100%; padding: 5px; background: var(--surface-1); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; box-shadow: 0 8px 24px #0002; animation: setup-provider-reveal .14s ease-out; }
+.setup-provider-menu { position: absolute; top: calc(100% + 6px); left: 0; width: 100%; padding: 6px; background: var(--float-bg); color: var(--ink); border: 1px solid var(--float-border); border-radius: var(--float-radius); box-shadow: var(--float-shadow); animation: setup-provider-reveal 180ms cubic-bezier(.22,1,.36,1); }
 .setup-provider-menu [data-provider-model-name] { white-space: normal; overflow-wrap: anywhere; }
-.setup-provider-option { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 42px; padding: 9px; border: 0; border-radius: 4px; background: transparent; color: inherit; text-align: left; font: 500 14px/1.5 var(--font-ui); cursor: pointer; }
-.setup-provider-option:hover, .setup-provider-option:focus-visible { background: var(--surface-2); }
-@keyframes setup-provider-reveal { from { opacity: 0; } to { opacity: 1; } }
+.setup-provider-option { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 42px; padding: 9px; border: 0; border-radius: var(--float-item-radius); background: transparent; color: inherit; text-align: left; font: 500 14px/1.5 var(--font-ui); cursor: pointer; }
+.setup-provider-option:hover, .setup-provider-option:focus-visible { background: var(--float-hover); }
+@keyframes setup-provider-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .setup-field { display: grid; min-width: 0; gap: 10px; font-size: 13px; color: var(--ink-soft); }
 .setup-field input, .setup-field select { width: 100%; min-width: 0; height: 46px; padding: 0 13px; font: 14px/1.5 var(--font-ui); border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-1); color: var(--ink); }
 .setup-field input:read-only { color: var(--muted); }

@@ -1,4 +1,4 @@
-import { escapeHtml as h, escapeAttr as a, simpleRichText, formatAmount, formatShortDate } from './utils.js';
+import { escapeHtml as h, escapeAttr as a, simpleRichText, formatAmount, formatShortDate, plusIcon } from './utils.js';
 import { informationText, informationWeekdays } from './agent-information-copy.js';
 import { createAgentInformationState, RUN_ACTIVE, RUN_TERMINAL } from './agent-information-model.js';
 import { taskPeriodLabel, taskPeriodValue, taskPeriodRulerMarkup } from './task-period-ruler.js';
@@ -11,7 +11,7 @@ const button = (ctx, key, action, id = '', disabled = false, extra = '') => '<bu
 const note = (ctx, key) => '<p class="information-note">' + h(text(ctx, key)) + '</p>';
 const empty = (ctx, key) => '<p class="information-empty">' + h(text(ctx, key)) + '</p>';
 export function taskCreateButton(ctx) {
-  return '<button class="button information-create-button" type="button" data-information-action="new-task" aria-haspopup="dialog">' + h(text(ctx, 'newTask')) + '</button>';
+  return '<button class="button primary information-create-button" type="button" data-information-action="new-task" aria-haspopup="dialog">' + plusIcon + h(text(ctx, 'newTask')) + '</button>';
 }
 export function informationDate(value, language) {
   if (value == null || value === '') return '—';

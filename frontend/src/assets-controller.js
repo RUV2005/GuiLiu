@@ -1,5 +1,5 @@
 import { normalizePrimaryCurrency } from './config.js';
-import { assetCurrency, assetDisplayCurrency, assetNumber, decimalAmount, findAssetAccount, historyRange, overviewAssetQuery, operationKey, createAssetState, debtBalance, newRepayments } from './assets-model.js';
+import { accountCurrency, assetCurrency, assetDisplayCurrency, assetNumber, decimalAmount, findAssetAccount, historyRange, overviewAssetQuery, operationKey, createAssetState, debtBalance, newRepayments } from './assets-model.js';
 import { patchAssetChanges } from './assets-view.js';
 import { createAssetCache } from './assets-cache.js';
 import { formatAmount } from './utils.js';
@@ -233,7 +233,7 @@ export function createAssetsController({ api, state, context, render, renderOver
         const unchangedTime = original.effective_at && Math.floor(Date.parse(original.effective_at) / 1000) === Math.floor(Date.parse(effective) / 1000);
         payload = { account_number: Number(account.account_number), amount: decimalAmount(value('amount'), value('currency'), { positive: true }), currency: value('currency'),
           effective_at: unchangedTime ? original.effective_at : effective, source_name: value('source_name'), note: value('note') };
-        if (value('settled_amount') || assetCurrency(account.currency) !== assetCurrency(payload.currency)) payload.settled_amount = decimalAmount(value('settled_amount'), account.currency, { positive: true });
+        if (value('settled_amount') || accountCurrency(account.currency) !== accountCurrency(payload.currency)) payload.settled_amount = decimalAmount(value('settled_amount'), account.currency, { positive: true });
         write = (key) => original.income_id ? api.updateIncome(original.income_id, payload, key) : api.createIncome(payload, key);
       } else return;
       const operationId = operationKey(operations, modal, payload);

@@ -1,9 +1,16 @@
 import { normalizePrimaryCurrency } from './config.js';
 import { importOperationKey } from './import-model.js';
+import { currencyName } from './utils.js';
 
 export const ASSET_PERIODS = ['1m', '3m', '6m', '1y'];
 export const ACCOUNT_TYPES = ['bank', 'cash', 'ewallet', 'credit', 'other'];
 export const assetCurrency = (value) => normalizePrimaryCurrency(value) === 'RMB' ? 'CNY' : 'JPY';
+// An account's or bill's own currency (JPY, CNY or USD). Totals and the display stay in assetCurrency (JPY or CNY).
+export const ACCOUNT_CURRENCIES = ['JPY', 'CNY', 'USD'];
+export const accountCurrency = (value) => {
+  const name = currencyName(value);
+  return ACCOUNT_CURRENCIES.includes(name) ? name : assetCurrency(value);
+};
 export const assetDisplayCurrency = state => assetCurrency(state.assetPreview.currency || state.settings.contextCurrency);
 export const assetNumber = (value) => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
 export const japanDay = (now = new Date()) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
@@ -48,7 +55,7 @@ export function assetHistorySeries(points, name, partialName) {
 export function decimalAmount(value, currency, { positive = false, nonnegative = false } = {}) {
   const raw = String(value ?? '').trim();
   const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(raw);
-  const places = assetCurrency(currency) === 'JPY' ? 0 : 2;
+  const places = accountCurrency(currency) === 'JPY' ? 0 : 2;
   if (!match || (match[3] || '').slice(places).replace(/0/g, '')) throw new Error('assetInvalidAmount');
   const whole = BigInt(match[2]);
   const fraction = (match[3] || '').slice(0, places).padEnd(places, '0');
@@ -68,7 +75,7 @@ export const exceedsLimit = (debt, limit) => limit !== '' && limit != null && Nu
 // Aggregate API decimals without binary rounding in displayed subtotals.
 export function sumAmounts(values, currency) {
   if (values.some((value) => assetNumber(value) === null)) return null;
-  const places = assetCurrency(currency) === 'JPY' ? 0 : 2;
+  const places = accountCurrency(currency) === 'JPY' ? 0 : 2;
   const total = values.reduce((sum, value) => sum + BigInt(decimalAmount(value, currency).replace('.', '')), 0n);
   const digits = (total < 0n ? -total : total).toString().padStart(places + 1, '0');
   return (total < 0n ? '-' : '') + (places ? digits.slice(0, -places) + '.' + digits.slice(-places) : digits);
@@ -87,7 +94,7 @@ export function findAssetAccount(state, id) {
 export function incomeFormValues(row = {}) {
   const source = row.source && typeof row.source === 'object' && !Array.isArray(row.source) ? row.source : {};
   return { source_name: source.source_name ?? row.source_name ?? '', amount: source.amount ?? row.amount ?? '',
-    currency: source.currency || row.currency ? assetCurrency(source.currency || row.currency) : '', settled_amount: source.settled_amount ?? (row.income_id != null ? row.amount : '') ?? '',
+    currency: source.currency || row.currency ? accountCurrency(source.currency || row.currency) : '', settled_amount: source.settled_amount ?? (row.income_id != null ? row.amount : '') ?? '',
     needsVerification: row.income_id != null && (source.amount == null || !source.currency) };
 }
 
@@ -135,7 +142,8 @@ export function assetsData(state) {
     const value = assetNumber(account.converted_balance), debt = value !== null && value < 0, total = debt ? totals.debt : totals.asset;
     return { account_number: account.account_number, name: account.name, value: account.converted_balance, debt,
       percent: value === null ? null : total > 0 ? Math.abs(value) / total * 100 : 0 };
-  }).sort((left, right) => {
+  // An account holding nothing (a paid-off card) is no share of either side; unknown balances stay listed.
+  }).filter(item => assetNumber(item.value) !== 0).sort((left, right) => {
     const a = assetNumber(left.value), b = assetNumber(right.value);
     if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
     return left.debt !== right.debt ? (left.debt ? 1 : -1) : left.debt ? a - b : b - a;

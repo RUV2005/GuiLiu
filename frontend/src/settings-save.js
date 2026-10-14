@@ -59,7 +59,8 @@ export function settingsSaveView(ctx) {
   return '<footer class="settings-save" data-settings-save-footer><p class="settings-draft-status" data-settings-dirty role="status" aria-live="polite">' +
     escapeHtml(t(ctx.language, ctx.state.runtimeSettings && runtimeDirty(ctx.state.runtimeSettings) ? 'settingsPending' : 'settingsClean')) + '</p><p class="settings-save-feedback' +
     (result?.tone === 'error' ? ' is-error' : '') + '" role="status" aria-live="polite"' + (message ? '' : ' hidden') + '>' +
-    escapeHtml(message) + '</p><button class="button primary" type="submit" data-settings-save' + (settingsSaving ? ' disabled' : '') + '>' +
+    escapeHtml(message) + '</p><button class="button" type="button" data-settings-discard disabled>' + escapeHtml(t(ctx.language, 'discardChanges')) +
+    '</button><button class="button primary" type="submit" data-settings-save' + (settingsSaving ? ' disabled' : '') + '>' +
     escapeHtml(t(ctx.language, settingsSaving ? 'saving' : 'saveSettings')) + '</button></footer>';
 }
 
@@ -93,6 +94,9 @@ export function patchSettingsSave(root, ctx) {
       lockedControls.delete(control);
     }
   }
+  // Discard is only offered while something is unsaved (and never during a save).
+  const discard = form.querySelector('[data-settings-discard]');
+  if (discard) discard.disabled = !dirty || Boolean(ctx.state.settingsSaving);
   const button = form.querySelector('[data-settings-save]');
   if (button) {
     button.disabled = Boolean(ctx.state.settingsSaving);

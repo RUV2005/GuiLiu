@@ -83,6 +83,25 @@ def _copy_table(source, target, name):
     return count
 
 
+def _legacy_counts(path, kind):
+    """Row counts of a legacy store's known tables, read-only; None if it cannot be read."""
+    try:
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=30)) as old:
+            names = {row[0] for row in old.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            return {table: old.execute(f"SELECT COUNT(*) FROM {_quote(table)}").fetchone()[0]
+                    for table in LEGACY_TABLES[kind] if table in names}
+    except sqlite3.Error:
+        return None
+
+
+def _recorded_counts(value):
+    try:
+        counts = json.loads(value)
+    except (TypeError, ValueError):
+        return False
+    return counts if isinstance(counts, dict) and counts else False
+
+
 def initialize_agent_database(path=None, *, legacy_paths=None):
     """Initialize/migrate before serving requests; stop old writers before switching stores.
 
@@ -122,7 +141,10 @@ def initialize_agent_database(path=None, *, legacy_paths=None):
                 # and has not changed since, so record the new path instead of merging it a second time.
                 earlier = next((row for row in db.execute("SELECT source_path, migrated_at, row_counts FROM AgentDatabaseMigration")
                                 if Path(row[0]).name == path.name.casefold()), None)
-                if earlier and path.stat().st_mtime <= datetime.fromisoformat(earlier[1]).timestamp():
+                # A copy made by a tool that resets modification times still holds exactly the rows it held when it
+                # was merged; merging it again would clash with sessions edited since.
+                if earlier and (path.stat().st_mtime <= datetime.fromisoformat(earlier[1]).timestamp()
+                                or _legacy_counts(path, kind) == _recorded_counts(earlier[2])):
                     db.execute("INSERT INTO AgentDatabaseMigration VALUES (?,?,?,?)", (
                         key, datetime.now(timezone.utc).isoformat(), earlier[2], "already merged as " + earlier[0]))
                     db.commit()

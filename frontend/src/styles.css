@@ -30,6 +30,15 @@
   /* One section-title style: serif at regular weight, like the page title (no synthetic bold). */
   --h2-font: 500 22px/1.3 var(--font-editorial);
   --shadow: 0 14px 40px rgba(0, 0, 0, 0.24);
+  /* One floating surface for menus, pickers, dock panels, tooltips and toasts: a step above the cards, a faint edge
+     and a soft drop shadow. Items inside share one row shape. */
+  --float-bg: var(--surface-3);
+  --float-border: rgb(255 255 255 / 8%);
+  --float-shadow: 0 18px 44px rgb(0 0 0 / 38%), 0 2px 8px rgb(0 0 0 / 22%);
+  --float-hover: #292d34;
+  --float-radius: 12px;
+  --dialog-radius: 16px;
+  --float-item-radius: 8px;
   --font-ui: Inter, "SF Pro Text", "Segoe UI", "Noto Sans SC", "Noto Sans JP", sans-serif;
   --font-editorial: Georgia, "Noto Serif SC", "Noto Serif JP", serif;
   --font-numeric: "SFMono-Regular", "Cascadia Mono", "Roboto Mono", monospace;
@@ -547,26 +556,29 @@ svg {
   left: 0;
   z-index: 20;
   padding: 6px;
-  background: var(--surface-2);
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  box-shadow: var(--shadow);
+  background: var(--float-bg);
+  border: 1px solid var(--float-border);
+  border-radius: var(--float-radius);
+  box-shadow: var(--float-shadow);
 }
 
 .search-popover button {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 9px 10px;
+  min-height: 36px;
+  padding: 8px 10px;
   gap: 10px;
   color: var(--ink-soft);
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--float-item-radius);
   text-align: left;
 }
 
-.search-popover button:hover {
-  background: var(--surface-hover);
+.search-popover button:hover,
+.search-popover button:focus-visible {
+  color: var(--ink);
+  background: var(--float-hover);
 }
 
 .search-popover button > span {
@@ -576,6 +588,20 @@ svg {
 
 .search-popover small {
   color: var(--quiet);
+}
+
+.search-popover .search-empty {
+  margin: 0;
+  padding: 10px;
+  color: var(--muted);
+  font: 400 13px/1.5 var(--font-ui);
+}
+
+/* The way on to the full transactions search closes the list, a quiet row under the matches. */
+.search-popover .search-all {
+  margin-top: 2px;
+  color: var(--muted);
+  font: 500 13px/1.5 var(--font-ui);
 }
 
 .status-dot {
@@ -1432,18 +1458,20 @@ svg {
   inset: auto;
   z-index: 1000;
   margin: 0;
-  padding: 5px;
+  padding: 6px;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
   color: var(--ink-soft);
-  background: var(--surface-2);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
+  background: var(--float-bg);
+  border: 1px solid var(--float-border);
+  border-radius: var(--float-radius);
+  box-shadow: var(--float-shadow);
   font: 400 13px/1.5 var(--font-ui);
 }
+
+.category-filter-menu.is-empty { display: none; }
 
 .category-filter-option {
   display: flex;
@@ -1457,7 +1485,7 @@ svg {
   color: var(--ink-soft);
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--float-item-radius);
   font: inherit;
   transition: background-color 160ms ease, color 160ms ease;
 }
@@ -1468,7 +1496,7 @@ svg {
 .category-filter-option.is-active,
 .category-filter-option:focus-visible {
   color: var(--ink);
-  background: var(--surface-hover);
+  background: var(--float-hover);
   outline: none;
 }
 
@@ -1513,8 +1541,323 @@ svg {
     flex-basis: 100%;
   }
 
+
   .filter-panel-header > button {
     margin-inline-start: auto;
+  }
+}
+
+/* Transactions filter card: a soft surface like the Settings cards; rows are told apart by space, not rules.
+   The wrapper's padding is the gap below the card, so the open/close height animation ends where the card lands. */
+.filter-card-wrap {
+  padding: 14px 0 18px;
+}
+
+.filter-panel.filter-card {
+  --filter-card: var(--surface-2);
+  --filter-card-ring: rgb(255 255 255 / 4%);
+  --filter-card-shadow: none;
+  gap: 18px;
+  padding: 18px 20px 20px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--filter-card);
+  box-shadow: 0 0 0 1px var(--filter-card-ring), var(--filter-card-shadow);
+}
+
+.filter-period-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  min-width: 0;
+}
+
+.filter-row-label {
+  flex: none;
+  min-width: 48px;
+  color: var(--muted);
+  font: 500 12px/1.4 var(--font-ui);
+}
+
+.filter-card .segmented-control.filter-periods {
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filter-card .filter-periods button {
+  min-height: 32px;
+  padding: 0 13px;
+  font: 500 13px/1.4 var(--font-ui);
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.filter-card .filter-periods button:not(.is-active):hover {
+  color: var(--ink-soft);
+}
+
+.filter-custom-dates {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.filter-custom-dates[hidden],
+.filter-reset[hidden] {
+  display: none;
+}
+
+.filter-custom-dates input {
+  width: 150px;
+}
+
+.filter-reset {
+  margin-inline-start: auto;
+}
+
+.filter-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.filter-select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.filter-select > svg {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.filter-panel select {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  padding: 0 34px 0 11px;
+  color: var(--ink);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  font: 400 var(--control-font-size)/1.4 var(--font-ui);
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.filter-panel select:focus {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+}
+
+/* Where the browser allows it (Chromium 135+), every select opens the same floating list as the category menu.
+   Other browsers keep their native list. */
+@supports (appearance: base-select) {
+  select,
+  .filter-panel select,
+  ::picker(select) { appearance: base-select; }
+
+  select { align-items: center; gap: 8px; white-space: nowrap; }
+
+  select::picker-icon {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin: -3px 2px 0 auto;
+    border: solid var(--muted);
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+    transition: transform 220ms cubic-bezier(.22,1,.36,1);
+  }
+
+  select:open::picker-icon { transform: translateY(3px) rotate(225deg); }
+  /* The filter select keeps its drawn chevron, turned like the category fields'. */
+  .filter-select > select::picker-icon { display: none; }
+  .filter-select:has(> select:open) > svg { transform: translateY(-50%) rotate(180deg); }
+  .filter-select > svg { transition: transform 220ms cubic-bezier(.22,1,.36,1); }
+
+  ::picker(select) {
+    box-sizing: border-box;
+    /* Open below like the category menu; flip up only when the list does not fit. */
+    position-try-order: normal;
+    max-height: min(320px, 50dvh);
+    margin: 6px 0;
+    padding: 6px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+    color: var(--ink-soft);
+    background: var(--float-bg);
+    border: 1px solid var(--float-border);
+    border-radius: var(--float-radius);
+    box-shadow: var(--float-shadow);
+    opacity: 0;
+    translate: 0 -4px;
+    transition: opacity 180ms cubic-bezier(.22,1,.36,1), translate 180ms cubic-bezier(.22,1,.36,1),
+      overlay 180ms allow-discrete, display 180ms allow-discrete;
+  }
+
+  select:open::picker(select) { opacity: 1; translate: none; }
+
+  @starting-style {
+    select:open::picker(select) { opacity: 0; translate: 0 -4px; }
+  }
+
+  select option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 36px;
+    padding: 8px 10px;
+    color: var(--ink-soft);
+    background: transparent;
+    border-radius: var(--float-item-radius);
+    font: 400 13px/1.5 var(--font-ui);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease;
+  }
+
+  select option:hover,
+  select option:focus-visible {
+    color: var(--ink);
+    background: var(--float-hover);
+    outline: none;
+  }
+
+  select option:checked { color: var(--ink); font-weight: 600; }
+  select option:disabled { color: var(--quiet); cursor: default; }
+  select option:disabled:hover { background: transparent; }
+
+  select option::checkmark {
+    content: "";
+    order: 1;
+    flex: none;
+    width: 6px;
+    height: 10px;
+    margin: 0 3px 3px auto;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @supports (appearance: base-select) {
+    select::picker-icon, .filter-select > svg, ::picker(select), select option { transition: none; }
+  }
+}
+
+/* While the card is closed, each active condition is a token that removes it. */
+.ledger-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 0 6px;
+}
+
+.filter-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 3px 8px 3px 12px;
+  color: var(--ink-soft);
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px var(--line);
+  font: 500 12px/1.4 var(--font-ui);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.filter-token span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-token svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--muted);
+}
+
+.filter-token:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.filter-token:hover svg {
+  color: var(--ink);
+}
+
+.filter-token-clear {
+  padding: 4px 6px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  font: 500 12px/1.4 var(--font-ui);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.filter-token-clear:hover {
+  color: var(--ink);
+}
+
+@container ledger-filters (max-width: 720px) {
+  .filter-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filter-fields > label:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@container ledger-filters (max-width: 420px) {
+  .filter-panel.filter-card {
+    padding: 16px;
+  }
+
+  .filter-row-label {
+    display: none;
+  }
+
+  .filter-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-custom-dates {
+    flex: 1 1 100%;
+  }
+
+  .filter-custom-dates input {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
   }
 }
 
@@ -1649,7 +1992,6 @@ table {
   --ledger-select-width: 44px;
   --ledger-actions-width: 172px;
   --ledger-cell-inset: 16px;
-  --ledger-content-width: calc(100% - var(--ledger-select-width) - var(--ledger-actions-width));
   min-width: 900px;
 }
 
@@ -1701,23 +2043,25 @@ tbody tr:last-child > td {
 
 .ledger-table th:nth-child(2),
 .ledger-table .ledger-row > td:nth-child(2) {
-  width: calc(var(--ledger-content-width) * .30);
+  /* Plain percentages: a calc() mixing % and px is read as auto by table layout, which split the four columns
+     evenly. The merchant gets the width the amount does not need. */
+  width: 30%;
 }
 
 .ledger-table th:nth-child(3),
 .ledger-table .ledger-row > td:nth-child(3) {
-  width: calc(var(--ledger-content-width) * .22);
+  width: 13%;
   text-align: right;
 }
 
 .ledger-table th:nth-child(4),
 .ledger-table .ledger-row > td:nth-child(4) {
-  width: calc(var(--ledger-content-width) * .24);
+  width: 17%;
 }
 
 .ledger-table th:nth-child(5),
 .ledger-table .ledger-row > td:nth-child(5) {
-  width: calc(var(--ledger-content-width) * .24);
+  width: 18%;
   text-align: center;
 }
 
@@ -2128,6 +2472,16 @@ button.category-tag:hover:not(.is-editing) {
   overflow-wrap: anywhere;
 }
 
+/* Long merchant and item names stop at two lines; the full name is the hover title. */
+.ledger-table :is(.merchant-value, .adr-product):not(.is-editing) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 .adr-amount-cell {
   text-align: right;
 }
@@ -2163,6 +2517,56 @@ button.category-tag:hover:not(.is-editing) {
 @keyframes adr-reveal {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+/* Phones: a bill reads as two lines (merchant and amount, then its categories and time) instead of a wide table
+   that shows only its first column until scrolled sideways. Item lines and today's orders use the same grid. The
+   selection boxes are a desktop tool and leave the room to the names. Rows still measure their own height for the
+   virtual list. */
+@container workspace (max-width: 600px) {
+  .ledger-table { display: block; min-width: 0; }
+  .ledger-table :is(thead, tbody) { display: block; }
+  .ledger-table tr:not(.ledger-spacer) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 34px;
+    grid-template-areas: "main amount actions" "sub when actions";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 6px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .ledger-table thead tr { grid-template-areas: "main amount actions"; padding: 6px 0; }
+  .ledger-table tr > :is(th, td) {
+    display: block;
+    width: auto !important;
+    height: auto;
+    min-width: 0;
+    padding: 0 !important;
+    border: 0;
+    position: static !important;
+    box-shadow: none !important;
+    background: none !important;
+  }
+  .ledger-table tr > :nth-child(1) { display: none; }
+  .ledger-table tr > :nth-child(2) { grid-area: main; }
+  .ledger-table tr > :nth-child(3) { grid-area: amount; text-align: right; }
+  .ledger-table tr > :nth-child(4) { grid-area: when; text-align: right; }
+  .ledger-table tr > :nth-child(5) { grid-area: sub; }
+  .ledger-table tr > :nth-child(6) { grid-area: actions; justify-self: end; }
+  .ledger-table thead :is(th:nth-child(4), th:nth-child(5)) { display: none; }
+  .ledger-table .ledger-spacer, .ledger-table .ledger-spacer > td { display: block; }
+  .ledger-table .category-pair { display: flex; flex-wrap: wrap; gap: 6px; max-width: none; margin: 0; }
+  .ledger-table .category-tag { min-height: 24px; padding: 2px 8px; font-size: 12px; }
+  .ledger-table .date-cell .editable-value { color: var(--muted); font-size: 11px; }
+  .ledger-table .row-actions { flex-direction: column; flex-wrap: nowrap; gap: 2px; }
+  .ledger-table .merchant-content { gap: 8px; }
+  .ledger-table .adr-disclosure:empty { display: none; }
+  .ledger-table .adr-detail-row { background: var(--surface-1); border-bottom: 0; }
+  .ledger-table .adr-detail-row.is-last { border-bottom: 1px solid var(--line); }
+  .ledger-table .adr-detail-row > .adr-product-cell { padding-left: 12px !important; }
+  .ledger-table :is(.merchant-cell, .adr-product-cell)::before,
+  .ledger-table :is(.merchant-cell, .adr-product-cell)::after { content: none; }
 }
 
 .transaction-structure {
@@ -3457,10 +3861,10 @@ button.category-tag:hover:not(.is-editing) {
 .mail-full-table tbody th { color: var(--ink-soft); font-weight: 500; }
 .settings-exit { padding-top: 24px; }
 .settings-exit-feedback { margin: 12px 0 0; color: var(--danger); font: 400 13px/1.7 var(--font-ui); }
-.settings-exit-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100% - 48px); padding: 28px; overflow: auto; background: var(--surface-1); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
+.settings-exit-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100% - 48px); padding: 28px; overflow: auto; background: var(--float-bg); color: var(--ink); border: 1px solid var(--float-border); border-radius: var(--dialog-radius); box-shadow: var(--float-shadow); }
 .settings-exit-dialog::backdrop { background: rgb(0 0 0 / 45%); }
 /* Settings → Mailboxes: the connection window and the bank confirmation window. */
-.mailbox-dialog { width: min(720px, calc(100% - 32px)); max-height: calc(100% - 48px); padding: 24px 28px; overflow: auto; background: var(--surface-1); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
+.mailbox-dialog { width: min(720px, calc(100% - 32px)); max-height: calc(100% - 48px); padding: 24px 28px; overflow: auto; background: var(--float-bg); color: var(--ink); border: 1px solid var(--float-border); border-radius: var(--dialog-radius); box-shadow: var(--float-shadow); }
 .mailbox-dialog::backdrop { background: rgb(0 0 0 / 45%); }
 .mailbox-dialog [hidden] { display: none !important; }
 .mailbox-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
@@ -3892,10 +4296,11 @@ button.category-tag:hover:not(.is-editing) {
   max-height: min(880px, calc(100vh - 48px));
   padding: 32px;
   overflow: auto;
-  background: var(--surface-1);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
+  /* Dialogs share the floating surface of menus and panels, with a larger radius for their size. */
+  background: var(--float-bg);
+  border: 1px solid var(--float-border);
+  border-radius: var(--dialog-radius);
+  box-shadow: var(--float-shadow);
   animation: modal-enter 180ms ease both;
 }
 
@@ -4186,6 +4591,9 @@ button.category-tag:hover:not(.is-editing) {
   gap: 17px;
 }
 
+/* A field with a hint underneath must not push its neighbour's control down. */
+.modal-form > .field { align-content: start; }
+
 
 .modal-form > footer,
 .modal-footer {
@@ -4276,10 +4684,10 @@ button.category-tag:hover:not(.is-editing) {
   max-width: 420px;
   padding: 12px 15px;
   color: var(--ink);
-  background: var(--surface-3);
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  box-shadow: var(--shadow);
+  background: var(--float-bg);
+  border: 1px solid var(--float-border);
+  border-radius: 10px;
+  box-shadow: var(--float-shadow);
   animation: toast-enter 180ms ease both;
 }
 

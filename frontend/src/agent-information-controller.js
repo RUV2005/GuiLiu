@@ -158,11 +158,15 @@ export function createAgentInformationController({ state, api, context, changed 
     }
   }
   async function tasks(quiet = false) {
-    return read('tasks', (client, options) => client.listAutomations(options), (response, s) => {
+    const ok = await read('tasks', (client, options) => client.listAutomations(options), (response, s) => {
       const result = informationList(response);
       s.tasks = result.items; s.tasksLoaded = true; s.workerEnabled = result.worker_enabled === true;
       if (s.taskId && !s.editor) s.task = s.tasks.find(task => task.id === s.taskId) || s.task;
     }, { quiet });
+    // Open the first task instead of an empty detail pane.
+    const s = current();
+    if (ok && valid(s) && state.route === 'agent-tasks' && !s.taskId && !s.editor && s.tasks.length) void selectTask(s.tasks[0].id);
+    return ok;
   }
   async function insights(quiet = false, append = false) {
     ensureSource();

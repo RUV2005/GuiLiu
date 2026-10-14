@@ -234,7 +234,7 @@ def build_data_package(keyword=None, start_time=None, end_time=None, categories=
     dataset_view: optional transaction_rows/expense_summary/daily_expenses/category_expenses, for structured
     dialogue only. Returns a chart dataset_id, schema, summary and preview instead of mail/bill pages.
     This mode aggregates the full matched snapshot (offset must be 0), not just max_results rows.
-    currency: JPY or CNY for dataset mode; currencies are never mixed or converted automatically.
+    currency: JPY, CNY or USD for dataset mode; currencies are never mixed or converted automatically.
     Evidence tagged match_candidate is unconfirmed. Never add ADR prices to main bill prices.
     Keyword search is not exhaustive; an empty result does not prove no relevant expense exists.
     The function never writes bills, ADR results, retry state, or vector memory, and calls no generative LLM.
@@ -370,7 +370,7 @@ def build_data_package(keyword=None, start_time=None, end_time=None, categories=
                       "keyword_expansions": expansions,
                       "time_basis": "main_order.ISOtime", "default_timezone": "Asia/Tokyo", "end_exclusive": True},
             "transactions": page, "evidence": list(evidence.values()),
-            "currency_codes": {"100": "CNY", "101": "JPY"},
+            "currency_codes": {"100": "CNY", "101": "JPY", "102": "USD"},
             "coverage": {"source_bill_count": len(snapshot["dealing_data"]), "filtered_bill_count": len(selected),
                          "evidence_search_available": index is not None,
                          "matched_count": matched_count, "returned_count": len(page), "offset": offset,

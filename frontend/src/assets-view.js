@@ -1,23 +1,19 @@
 import { t, localeFor } from './i18n.js';
 import { financeAttr } from './finance-colors.js';
 import { escapeHtml as e, escapeAttr as a, formatAmount, formatDate, formatDateTime, formatPercent } from './utils.js';
-import { lineChart } from './charts.js';
+import { lineChart, axisNumberFormatter } from './charts.js';
 import { pageChartMotion } from './page-chart-motion.js';
-import { ASSET_PERIODS, ACCOUNT_TYPES, assetCurrency, assetDisplayCurrency, assetNumber, assetsData, findAssetAccount, japanInputTime, incomeFormValues, assetHistorySeries } from './assets-model.js';
+import { ASSET_PERIODS, ACCOUNT_CURRENCIES, ACCOUNT_TYPES, assetCurrency, assetDisplayCurrency, assetNumber, assetsData, findAssetAccount, japanInputTime, incomeFormValues, assetHistorySeries } from './assets-model.js';
 
 const versions = new WeakMap();
 let chartObserver;
 const text = (ctx, key, vars) => t(ctx.language, key, vars);
 const money = (ctx, value, code = assetDisplayCurrency(ctx.state)) => assetNumber(value) === null ? text(ctx, 'assetUnknown') : formatAmount(Number(value), code, ctx.language);
 const currencyLabel = code => code === 'RMB' ? 'CNY' : code;
+// Round steps with one unit per axis, like the spending charts (10万, 8万 …), instead of quarter splits.
 export function assetAxisOptions(ctx, width) {
-  return { maxAxisLabels: Math.max(2, Math.min(7, Math.floor(((width || 760) - 74) / 60) + 1)),
-    axisValueFormatter(value, step) {
-      const unit = Math.abs(value) >= 1e6 ? 1e6 : Math.abs(value) >= 1e3 ? 1e3 : 1;
-      const digits = Math.max(0, Math.min(6, Math.ceil(-Math.log10(step / unit))));
-      const rounded = Number((value / unit).toFixed(digits));
-      return (Object.is(rounded, -0) ? 0 : rounded).toLocaleString(localeFor(ctx.language), { maximumFractionDigits: digits }) + (unit === 1e6 ? 'm' : unit === 1e3 ? 'k' : '');
-    } };
+  return { maxAxisLabels: Math.max(2, Math.min(7, Math.floor(((width || 760) - 74) / 60) + 1)), niceTicks: true,
+    axisValueFormatter: (value, step, ticks) => axisNumberFormatter(ctx.language, ticks)(value) };
 }
 const option = (value, label, current) => '<option value="' + a(value) + '"' + (String(value) === String(current) ? ' selected' : '') + '>' + e(label) + '</option>';
 const button = (ctx, kind, key, id = '', primary = false) => '<button type="button" class="button compact' + (primary ? ' primary' : '') + '" data-assets-open="' + kind + '" data-id="' + a(id) + '">' + e(text(ctx, key)) + '</button>';
@@ -44,7 +40,12 @@ export function repaymentView(ctx, account) {
     '<div class="button-row">' + button(ctx, 'repayment', plan ? 'assetRepaymentEdit' : 'assetRepaymentSet', account.account_number) + '</div></section>';
 }
 const input = (name, value = '', extra = '') => '<input name="' + name + '" value="' + a(value ?? '') + '" ' + extra + ' />';
-export const accountOptions = (ctx, current, accounts = ctx.state.assets.accounts) => accounts.map((account) => option(account.account_number, '#' + account.account_number + ' ' + account.name + ' · ' + account.currency, current)).join('');
+// Accounts read by name and currency, as on the transactions side; the number appears only when two share a name.
+export const accountOptions = (ctx, current, accounts = ctx.state.assets.accounts) => accounts.map((account) => {
+  const shared = accounts.some((other) => other !== account && other.name === account.name);
+  const name = account.name ? account.name + (shared ? ' · #' + account.account_number : '') : '#' + account.account_number;
+  return option(account.account_number, name + ' · ' + account.currency, current);
+}).join('');
 
 export function assetScopeSelect(ctx) {
   return '<select class="context-select" data-asset-account aria-label="' + a(text(ctx, 'assetAccountScope')) + '">' +
@@ -136,7 +137,8 @@ export function assetsView(ctx, { pageHeader, icon }) {
   const slots = regions(ctx), filters = ctx.state.assetPreview;
   const region = (key) => '<div data-asset-region="' + key + '">' + slots[key] + '</div>';
   return '<section class="page assets-page">' + pageHeader(ctx, 'assetKicker', 'assetTitle', '',
-    button(ctx, 'income', 'assetAddIncome') + button(ctx, 'account', 'assetAddAccount', '', true)) +
+    '<button type="button" class="button" data-assets-open="income" data-id="">' + e(text(ctx, 'assetAddIncome')) + '</button>' +
+    '<button type="button" class="button primary" data-assets-open="account" data-id="">' + icon('plus') + e(text(ctx, 'assetAddAccount')) + '</button>') +
     '<div class="asset-page-meta">' + region('status') + '<div class="asset-local-scope">' + assetScopeSelect(ctx) + '</div></div>' +
     '<section class="asset-balance-summary" data-asset-region="summary">' + slots.summary + '</section>' +
     '<section class="editorial-section asset-trend-section"><header class="section-header"><h2>' + e(text(ctx, 'assetTrend')) +
@@ -243,7 +245,7 @@ export function assetModalContent(ctx, { modalHeader }) {
     fields += '<label class="field" data-asset-credit-field' + (account?.account_type === 'credit' ? '' : ' hidden') + '><span>' + e(text(ctx, 'assetCreditLimit')) +
       '</span>' + input('credit_limit', account?.credit_limit, 'inputmode="decimal"') + '</label>';
     if (!account) fields += field(ctx, 'assetAccountNumber', input('account_number', '', 'type="number" min="1" step="1" placeholder="' + a(text(ctx, 'assetAutoNumber')) + '"')) +
-      field(ctx, 'assetCurrency', '<select name="currency">' + ['JPY', 'CNY'].map((code) => option(code, code, assetCurrency(ctx.state.settings.contextCurrency))).join('') + '</select>') +
+      field(ctx, 'assetCurrency', '<select name="currency">' + ACCOUNT_CURRENCIES.map((code) => option(code, code, assetCurrency(ctx.state.settings.contextCurrency))).join('') + '</select>') +
       '<label class="field"><span data-asset-balance-label>' + e(text(ctx, 'assetOpening')) + '</span><span data-asset-debt-label hidden>' + e(text(ctx, 'assetOpeningDebt')) + '</span>' +
         input('opening_balance', '', 'inputmode="decimal" placeholder="' + a(text(ctx, 'assetOptionalOpening')) + '"') + '</label>' + field(ctx, 'assetEffective', input('effective_at', japanInputTime(), 'type="datetime-local" step="1" required'));
   } else if (kind === 'calibrate') {
@@ -270,7 +272,7 @@ export function assetModalContent(ctx, { modalHeader }) {
     fields = field(ctx, 'account', '<select name="account_number" required>' + accountOptions(ctx, selected) + '</select>') +
       field(ctx, 'assetIncomeSource', input('source_name', original.source_name, 'maxlength="300"')) +
       field(ctx, 'assetIncomeAmount', input('amount', original.amount, 'inputmode="decimal" required')) +
-      field(ctx, 'assetCurrency', '<select name="currency">' + ['JPY', 'CNY'].map((code) => option(code, code, original.currency || selectedAccount?.currency || 'JPY')).join('') + '</select>') +
+      field(ctx, 'assetCurrency', '<select name="currency">' + ACCOUNT_CURRENCIES.map((code) => option(code, code, original.currency || selectedAccount?.currency || 'JPY')).join('') + '</select>') +
       field(ctx, 'assetSettled', input('settled_amount', original.settled_amount, 'inputmode="decimal"')) +
       field(ctx, 'assetEffective', input('effective_at', japanInputTime(data.effective_at || new Date()), 'type="datetime-local" step="1" required')) +
       field(ctx, 'assetNote', input('note', data.note, 'maxlength="1000"'));

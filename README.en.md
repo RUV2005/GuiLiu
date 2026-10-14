@@ -120,6 +120,36 @@ Inside the extracted package, `README.md` is the user guide and `DEPLOYMENT.md` 
 
 Mail sync, detail enrichment and automated tasks are on by default and start only after setup is complete; mail sync can be turned off on the settings page. Later versions install with one click from Settings → Version and updates, or from the update entry at the bottom of the sidebar.
 
+## Send a screenshot with an iPhone shortcut
+
+After paying, stay on the payment confirmation, e-receipt or order details screen and double-tap the back of your iPhone. The iPhone takes a screenshot and emails it straight to the mailbox GUILIU reads, and GUILIU records it. You only set this up once.
+
+**Before you start**
+
+- To: the Gmail or 163 address connected to GUILIU.
+- From: the receipt sender address you entered during setup. GUILIU only reads images sent from this address, so add that account to the iPhone's built-in Mail app. To change the address later, edit "OCR mail query" in Settings → Runtime settings (written as `from:address`).
+
+**Create the shortcut**
+
+1. Open the Shortcuts app, tap "+" in the top-right corner to create a shortcut, and give it a name such as "Send screenshot to GUILIU".
+2. Tap "Add Action", then search for and add "Take Screenshot".
+3. Add "Send Email" and make sure it sends the "Screenshot" from the previous step. Put the address connected to GUILIU in the recipients; any subject works, for example "GUILIU screenshot".
+4. Expand "Send Email" and turn off "Show Compose Sheet" so the email is sent without opening the editor. If the iPhone has several mail accounts, choose the receipt sender address under "From".
+5. Run it once. The first time, iOS asks whether the shortcut may send email; choose "Always Allow".
+
+**Pick a trigger** (any one)
+
+- Back Tap (iPhone 8 and later): Settings → Accessibility → Touch → Back Tap → Double Tap (or Triple Tap), then choose the shortcut.
+- Action button (iPhone 15 Pro and later): Settings → Action Button → Shortcut, then choose the shortcut.
+- You can also add it to the Home Screen or Control Center, or say the shortcut's name to Siri.
+
+**After it is sent**
+
+When GUILIU reads the new email it recognizes the image. If it matches an existing bank charge, the items are added to that transaction as details and nothing is counted twice; a new purchase is recorded on its own; images that are not purchases are skipped. Automatic mail sync needs to be on. Screenshots sent while your computer is off are processed the next time GUILIU runs.
+
+- The whole screen is sent, so check that nothing you would rather keep private is showing before you trigger it.
+- To send a screenshot that is already in Photos, create a second shortcut, turn on "Show in Share Sheet" in its details, add only "Send Email" and set it to send "Shortcut Input". Then select the image in Photos, tap Share and choose the shortcut.
+
 ## Repository layout
 
 | Path | Contents |

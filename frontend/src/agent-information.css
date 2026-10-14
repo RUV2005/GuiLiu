@@ -14,7 +14,7 @@
 .information-status[data-reply-state="running"] { color: var(--ink); animation: information-reply-pulse 1800ms ease-in-out infinite; }
 @keyframes information-reply-pulse { 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .information-status[data-reply-state="running"] { animation: none; } }
-.information-layout { display: grid; grid-template-columns: minmax(200px, 248px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.information-layout { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 28px; align-items: start; }
 .information-index { position: relative; min-width: 0; }
 /* Screen-reader-only text, kept inside a positioned box so it cannot widen a scroll area. */
 .information-sr, .information-workspace[data-mode="information"] .information-index-title { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
@@ -63,9 +63,9 @@
 .information-status[data-schedule-enabled="true"]::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 7px; border-radius: 50%; background: currentColor; vertical-align: middle; }
 .agent-tasks-page .page-header { display: flex; align-items: center; gap: 18px; }
 .agent-tasks-page .page-actions { flex-shrink: 0; }
-.agent-tasks-page .information-create-button { background: #101112; color: #fff; border: 1px solid #43464a; min-height: 42px; padding: 10px 18px; border-radius: 8px; white-space: nowrap; }
-.agent-tasks-page .information-create-button:hover { background: #292b2e; border-color: #686c72; }
-:is(.information-task-dialog, .information-run-dialog) { width: min(620px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); box-sizing: border-box; margin: auto; padding: 28px; overflow: auto; overscroll-behavior: contain; color: var(--ink); background: var(--surface-1); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: var(--shadow); }
+/* The create button is the shared primary button, as on the other pages. */
+.agent-tasks-page .information-create-button { white-space: nowrap; }
+:is(.information-task-dialog, .information-run-dialog) { width: min(620px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 40px); box-sizing: border-box; margin: auto; padding: 28px; overflow: auto; overscroll-behavior: contain; color: var(--ink); background: var(--float-bg); border: 1px solid var(--float-border); border-radius: var(--dialog-radius); box-shadow: var(--float-shadow); }
 :is(.information-task-dialog, .information-run-dialog):not([open]) { display: none; }
 :is(.information-task-dialog, .information-run-dialog)[open] { animation: information-dialog-enter 280ms cubic-bezier(.2,.8,.2,1) both; }
 :is(.information-task-dialog, .information-run-dialog)::backdrop { background: #0008; animation: information-backdrop-enter 220ms ease both; }
@@ -86,7 +86,7 @@
 .information-task-dialog [data-information-part="editorStatus"]:not(:empty) { padding: 18px 30px 8px 0; }
 @keyframes information-dialog-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes information-backdrop-enter { from { opacity: 0; } to { opacity: 1; } }
-@media (max-width: 600px) { .information-task-dialog { padding: 22px 18px; } .agent-tasks-page .information-create-button { padding: 9px 12px; } }
+@media (max-width: 600px) { .information-task-dialog { padding: 22px 18px; } }
 .information-detail-header > h2, .information-editor h2 { margin: 0; font: 500 24px/1.5 var(--font-editorial); overflow-wrap: anywhere; }
 .information-editor h2 { margin: 0 0 24px; }
 .information-article-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }

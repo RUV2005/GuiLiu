@@ -342,7 +342,7 @@ const labels = {
   balancePlaceholder: ['当前余额，可留空', '現在の残高（空欄可）', 'Current balance (optional)'],
   debtInvalid: ['欠款请填写正数金额。', '未払い残高は正の金額で入力してください。', 'Enter the amount owed as a positive number.'],
   debtOverLimit: ['欠款不能超过信用额度。', '未払い残高は利用限度額を超えられません。', 'The amount owed cannot exceed the credit limit.'],
-  amountPrecision: ['请填写有效金额：JPY 不含小数，CNY 最多两位小数；信用额度不能为负。', 'JPY は整数、CNY は小数 2 桁以内で入力してください。限度額は負にできません。', 'Enter a valid amount: whole yen for JPY, at most two decimals for CNY. Credit limit cannot be negative.'],
+  amountPrecision: ['请填写有效金额：JPY 不含小数，CNY 和 USD 最多两位小数；信用额度不能为负。', 'JPY は整数、CNY と USD は小数 2 桁以内で入力してください。限度額は負にできません。', 'Enter a valid amount: whole yen for JPY, at most two decimals for CNY and USD. Credit limit cannot be negative.'],
   noteLong: ['备注不能超过 1000 字符。', 'メモは 1000 文字以内です。', 'Note must be at most 1,000 characters.'],
   duplicateAccount: ['已有同名、同机构、同币种和同类型账户。请优先使用已有账户；确为不同账户时再勾选确认。', '同名・同機関・同通貨・同種類の口座があります。既存口座を優先し、別口座の場合のみ確認してください。', 'A matching account already exists. Reuse it unless you confirm this is a separate account.'],
   duplicateConfirm: ['这是另一个独立账户，仍然创建。', '別の口座として作成します。', 'This is a separate account; create it anyway.'],

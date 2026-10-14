@@ -1,6 +1,7 @@
 import { createImportState, validateImportFile, validateJob, validateRows, processingImport, editableImport,
   planImportBatches, importOperationKey, correctionValues, canEditImportRow, presetTemplate, parseImportPreset,
   defaultImportFilter, IMPORT_SHOWN_STEP } from './import-model.js';
+import { accountCurrency } from './assets-model.js';
 const IMPORT_ROWS_PAGE = 500;
 
 export function createImportService({ api, state, source, changed = () => {}, afterCommit = async () => {},
@@ -142,7 +143,9 @@ export function createImportService({ api, state, source, changed = () => {}, af
     if (account.balance == null || account.balance_status === 'needs_opening_balance') { s.error = 'accountNeedsOpening'; paint(s); return false; }
     const body = new FormData(); body.append('file', s.file);
     body.append('account_number', s.form.account_number); body.append('use_agent', String(s.form.use_agent));
-    for (const field of ['preset_id', 'timezone', 'default_currency', 'sheet_name']) if (s.form[field]) body.append(field, s.form[field]);
+    for (const field of ['preset_id', 'timezone', 'sheet_name']) if (s.form[field]) body.append(field, s.form[field]);
+    // A file without a currency column is in the account's own currency unless a preset or the user names another.
+    body.append('default_currency', s.form.default_currency || accountCurrency(account.currency));
     s.busy = 'uploading'; s.error = ''; s.notice = ''; paint(s);
     try {
       const job = validateJob((await api.createImportPreview(body)).result);
@@ -160,7 +163,7 @@ export function createImportService({ api, state, source, changed = () => {}, af
     try {
       const preset = (await api.getImportPreset(id)).result;
       if (!live(s) || s.form.preset_id !== id) return null;
-      s.form.timezone = preset.default_timezone || 'Asia/Shanghai'; s.form.default_currency = preset.default_currency || 'CNY';
+      s.form.timezone = preset.default_timezone || 'Asia/Shanghai'; s.form.default_currency = preset.default_currency || '';
       if (!s.presetDirty && s.job?.state !== 'mapping_required') s.presetText = JSON.stringify(preset, null, 2);
       paint(s); return preset;
     } catch (error) { if (live(s)) { s.error = message(error); paint(s); } return null; }

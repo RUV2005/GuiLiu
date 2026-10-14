@@ -54,7 +54,7 @@ function setup(ctx) {
       <div class="import-map-grid">
         <label>${h(t('source'))}<select data-import-form="preset_id"${attr}>${opts([['', t('auto')], ...s.presets.map(p => [p.preset_id, p.name || p.preset_id])], s.form.preset_id)}</select></label>
         <label>${h(t('timezone'))}<input data-import-form="timezone" value="${a(s.form.timezone)}"${attr}/></label>
-        <label>${h(t('defaultCurrency'))}<select data-import-form="default_currency"${attr}>${opts([['CNY', 'CNY'], ['JPY', 'JPY']], s.form.default_currency)}</select></label>
+        <label>${h(t('defaultCurrency'))}<select data-import-form="default_currency"${attr}>${opts([['', t('accountCurrency')], ['CNY', 'CNY'], ['JPY', 'JPY'], ['USD', 'USD']], s.form.default_currency)}</select></label>
         <label>${h(t('sheet'))}<input data-import-form="sheet_name" value="${a(s.form.sheet_name)}"${attr}/></label>
       </div>
       <label class="import-check"><input type="checkbox" data-import-form="use_agent"${s.form.use_agent ? ' checked' : ''}${attr}/><span>${h(t('useAgent'))}</span></label>

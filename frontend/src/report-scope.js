@@ -2,10 +2,14 @@ import { t } from './i18n.js';
 import { normalizePrimaryCurrency } from './config.js';
 import { contextRange, comparablePreviousRange, currencyName, dateInputValue, escapeHtml } from './utils.js';
 
+// Accounts read by name. The number is added only when two saved accounts share a name; an account that no saved
+// account describes reads as unlisted, with its number so it can still be told apart.
 export function reportAccountLabel(ctx, value = ctx.state.settings.contextAccount) {
   if (!value || value === 'all') return t(ctx.language, 'allAccounts');
-  const account = ctx.state.assets?.accounts?.find(item => String(item.account_number) === String(value));
-  return account?.name ? account.name + ' · #' + value : '#' + value;
+  const accounts = ctx.state.assets?.accounts || [];
+  const account = accounts.find(item => String(item.account_number) === String(value));
+  if (!account?.name) return t(ctx.language, 'unlistedAccount', { number: value });
+  return accounts.some(item => item !== account && item.name === account.name) ? account.name + ' · #' + value : account.name;
 }
 
 export function comparisonLabels(ctx) {

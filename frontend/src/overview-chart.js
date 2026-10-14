@@ -177,6 +177,13 @@ export function mountOverviewChart(root, saved, ctx) {
     navigation = host ? createHeatmapNavigation(host, node => hover?.clearWithin(node)) : null;
     if (host) Object.entries(events).forEach(([name, callback]) => host.addEventListener(name, callback));
   }
+  // A heatmap seen for the first time opens at its newest months (the end), not the oldest; a re-render of the
+  // same range keeps where the user scrolled.
+  const fresh = host?.querySelector('.daily-heatmap-scroll:not([data-placed])');
+  if (fresh) {
+    fresh.dataset.placed = '';
+    if (saved?.scope !== fresh.dataset.heatmapScope) { fresh.scrollLeft = fresh.scrollWidth; fresh.scrollTop = fresh.scrollHeight; }
+  }
   if (!host || !saved) return;
   const scroll = host.querySelector('.daily-heatmap-scroll');
   const restoreScroll = () => {

@@ -17,7 +17,7 @@ function inputView(field, state, language) {
     '</strong></span><input type="checkbox"' + attrs + (value ? ' checked' : '') +
     ' /><i class="switch-track" aria-hidden="true"><b></b></i></label>' + feedback + '</div>';
   let control;
-  if (field.type === 'model') {
+  if (field.type === 'model' || field.choices) {
     const models = [...new Set([...RUNTIME_MODELS, value].filter(Boolean))];
     control = '<select' + attrs + '>' + models.map(model => '<option value="' + escapeAttr(model) + '"' +
       (model === value ? ' selected' : '') + '>' + escapeHtml(model) + '</option>').join('') + '</select>';
@@ -48,11 +48,11 @@ export function runtimeSettingsView(ctx) {
       '<div class="runtime-grid">' + RUNTIME_FIELDS.filter(field => field.path.startsWith(group + '.') &&
         !['models.adr', 'models.legacy_adr', 'loop.adr_ocr_limit'].includes(field.path))
         .map(field => inputView(field, state, ctx.language)).join('') + '</div></details>').join('') + '</fieldset></div>' : '') +
-    // Reload stays available when loading failed, so the section can be read again.
+    // Saving and discarding live in the page's one save bar. Reload only appears when loading failed, so the
+    // section can be read again.
     '<footer class="runtime-actions">' + (doc ? '<div class="runtime-feedback" role="status" aria-live="polite"><p>' + escapeHtml(status) +
-      '</p><p class="runtime-error" data-runtime-save-error' + (error ? '' : ' hidden') + '>' + escapeHtml(error) + '</p></div>' : '') +
-    '<button type="button" class="button" data-runtime-reload>' + escapeHtml(text('reload')) + '</button>' +
-    (doc ? '<button class="button" type="button" data-runtime-discard>' + escapeHtml(text('discard')) + '</button>' : '') + '</footer></section>';
+      '</p><p class="runtime-error" data-runtime-save-error' + (error ? '' : ' hidden') + '>' + escapeHtml(error) + '</p></div>' :
+      '<button type="button" class="button" data-runtime-reload>' + escapeHtml(text('reload')) + '</button>') + '</footer></section>';
 }
 
 export function patchRuntimeSettings(root, ctx) {
@@ -76,10 +76,8 @@ export function patchRuntimeSettings(root, ctx) {
   const fieldset = host.querySelector('.runtime-fields');
   const saving = state.saving || ctx.state.settingsSaving;
   if (fieldset) fieldset.disabled = Boolean(saving);
-  host.querySelector('[data-runtime-reload]').disabled = Boolean(state.loading || saving);
-  host.querySelectorAll('[data-runtime-discard]').forEach(node => {
-    node.disabled = Boolean(state.loading || saving || !runtimeDirty(state));
-  });
+  const reload = host.querySelector('[data-runtime-reload]');
+  if (reload) reload.disabled = Boolean(state.loading || saving);
   host.setAttribute('aria-busy', String(state.loading || state.saving));
   patchSettingsSave(root, ctx);
   return true;
