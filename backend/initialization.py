@@ -130,6 +130,8 @@ def bootstrap_database(db_path):
         from database import DBmanage
         with conn:
             DBmanage(db_path)._ensure_runtime_schema(conn)
+        from transaction_reconciliation import ensure_reconciliation_schema
+        ensure_reconciliation_schema(conn)
     from adr_scheduler import ensure_status_table
     ensure_status_table(db_path)
     DBmanage(db_path).ensure_ADRDoneList()

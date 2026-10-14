@@ -29,6 +29,10 @@ from service_auth import agent_requests
 import assets
 from categorization import category
 from database import DBmanage
+from transaction_reconciliation import (
+    attach_source, ensure_reconciliation_schema, find_cross_source_match,
+    merge_merchant_if_generic, source_id_for_import,
+)
 from runtime_settings import server_data_path
 
 
@@ -393,6 +397,18 @@ def find_duplicate_transaction(conn, row, window_minutes=1):
     if row["normalized"].get("transaction_kind") == "income":
         return find_duplicate_income(conn, row, window_minutes=window_minutes)
     data = row["normalized"]
+    cross_source = find_cross_source_match(
+        conn,
+        amount=data["price"],
+        currency_number=data["CurrencyTypeNumber"],
+        isotime=data["isotime"],
+        merchant=data.get("shop_name") or data.get("raw_shop_name"),
+        source_type="statement",
+        window_minutes=10,
+    )
+    if cross_source:
+        cross_source["reasons"].append("cross_source_match")
+        return "duplicate", [cross_source]
     op = conn.execute("SELECT ResultJSON FROM AssetOperation WHERE OperationID=?", (row["operation_id"],)).fetchone()
     if op:
         result = json.loads(op[0])
@@ -521,6 +537,7 @@ class ImportService:
         conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
         try:
+            ensure_reconciliation_schema(conn)
             with conn:
                 yield conn
         finally:
@@ -942,6 +959,13 @@ class ImportService:
         known = {(c.get("DealingNumber"), c.get("income_id")) for c in row["duplicate_candidates"]}
         current = {(c.get("DealingNumber"), c.get("income_id")) for c in candidates}
         if state == "duplicate":
+            source_id = source_id_for_import(ident, row["row_id"])
+            if candidates and candidates[0].get("DealingNumber"):
+                attach_source(conn, source_id, candidates[0]["DealingNumber"], "statement", {
+                    "filename": job.get("filename"),
+                    "row_id": row.get("row_id"),
+                })
+                merge_merchant_if_generic(conn, candidates[0]["DealingNumber"], row["normalized"].get("shop_name"))
             return {"commit_status": "skipped", "duplicate_candidates": candidates}
         if state == "needs_review" or (state == "suspected_duplicate" and (not choice.get("confirm_distinct") or not current <= known)):
             return {"commit_status": "needs_review", "duplicate_candidates": candidates, "status": state}
@@ -967,6 +991,10 @@ class ImportService:
             n["main_category"], n["sub_category"], n["AccountNumber"], n.get("detail_category", ""), None, None)
         result = assets.run_operation(conn, row["operation_id"], "dealing.create", payload,
             lambda operation_id: DBmanage.insert_dealing(conn, payload, operation_id))
+        attach_source(conn, source_id_for_import(ident, row["row_id"]), result["DealingNumber"], "statement", {
+            "filename": job.get("filename"),
+            "row_id": row.get("row_id"),
+        })
         return {"commit_status": "imported", "DealingNumber": result["DealingNumber"], "balance_sync": result["balance_sync"]}
 
     def teach_memory(self, ident):

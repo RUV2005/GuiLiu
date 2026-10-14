@@ -17,6 +17,7 @@
 - **银行通知邮件**：连接 Gmail 或网易 163（可以同时连接），归流每分钟读取新邮件，用规则和大模型提取商户、金额、币种与时间，分类、查重后入账。识别规则按发件人自动生成，不依赖内置的银行列表；规则失效时会重新生成。
 - **小票和支付截图**：发到已连接的邮箱即可。图片会被识别：对应已有扣款时补成那笔账单的商品明细，不会重复记账；是新消费时单独入账。
 - **账单文件**：支付宝、微信账单和银行流水（CSV / Excel）可以批量导入，先预览再写入。
+- **微信本地数据（可选）**：Windows 上可通过本地数据库解密读取微信账号、群组、会话和消息，并监听新消息。
 - **明细补全（ADR）**：一笔银行扣款买了哪些东西？归流在邮件和小票里找证据，把商品明细补到原账单下面。
 - 换了邮箱连接方式（Google 授权和应用专用密码之间切换）后，以前处理过的邮件会被认出来，不会重新处理；Gmail 授权失效时，侧栏和设置页会提示重新连接。
 
@@ -172,6 +173,38 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe run.py serve
 ```
+
+### 启用微信解密读取
+
+微信读取是可选模块，默认关闭，不影响普通 GuiLiu 启动。Windows 上安装额外依赖并启用：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements-wechat.txt
+$env:GUILIU_WECHAT_ENABLED = "true"
+.\.venv\Scripts\python.exe run.py serve
+```
+
+启用后，后端提供以下本机接口：
+
+- `GET /wechat/status`：查看模块状态；
+- `GET /wechat/accounts`：列出可发现的微信账号；
+- `POST /wechat/listener/start`、`POST /wechat/listener/stop`：控制新消息监听；
+- `GET /wechat/self`、`GET /wechat/groups`、`GET /wechat/sessions`：读取账号、群组和会话；
+- `GET /wechat/messages?username=<会话ID>`：读取历史消息；
+- `GET /wechat/events?after=<事件ID>`：读取监听到的新消息事件。
+- `GET /wechat/payments`：查看已识别的微信支付通知及其入账状态。
+- `GET /wechat/reconciliation/<账本编号>`：查看一笔账本记录关联的账单文件和微信支付来源。
+
+要开启自动记账，还需要明确配置人民币账本账户和分类，避免未经确认的消息直接写入：
+
+```powershell
+$env:GUILIU_WECHAT_AUTO_BOOKKEEPING = "true"
+$env:GUILIU_WECHAT_ACCOUNT = "200001"
+$env:GUILIU_WECHAT_MAIN_CATEGORY = "餐饮"
+$env:GUILIU_WECHAT_SUB_CATEGORY = "正餐"
+```
+
+只有包含明确支付标记和金额的微信支付消息会进入候选；退款、收款和无法确认金额的消息只保留在 `/wechat/payments` 中，不会自动记账。账单文件和微信支付通知会按金额、币种、时间和商户进行互相验证；确认是同一笔时只保留一条账本记录，并在 `/wechat/reconciliation/<账本编号>` 中登记双方来源，缺失的商户名称也会由另一来源补充。每条入账记录使用 `wechat:<local_id>` 作为 `msgid`，重复通知不会重复写入。对应的可复用 Python 模块位于 `backend/wechat_reader/`，其他 Python 代码可以直接导入 `WeChatReader`。原有微信/支付宝账单文件导入和邮件 OCR 功能保持不变。
 
 启动器会一次启动前端、后端和 Agent，自动选择空闲端口（默认 3000 / 8001 / 8000，被占用时顺延），并打开浏览器完成配对。运行数据写入 `.runtime/`，不要提交到 Git。调试时可以用 `--frontend-port`、`--backend-port`、`--agent-port` 固定端口；使用 Google 授权的“网页应用”类型客户端时，后端端口必须与 Google 控制台登记的回调地址一致。从源码运行时不支持在线更新，用 Git 拉取新版本即可。
 

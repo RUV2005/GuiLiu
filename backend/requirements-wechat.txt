@@ -1,0 +1,2 @@
+# Optional Windows-only integration for decrypted WeChat database reads.
+wechatauto-replica>=1.2.2.6; platform_system == "Windows"

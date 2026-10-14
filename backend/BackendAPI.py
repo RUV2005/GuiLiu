@@ -35,6 +35,7 @@ from initialization import (Initialization, StepRequest, SetupError, bootstrap_d
 from system_control import ShutdownController, ShutdownRequest, require_local_control, exit_service
 from oauth_callback_page import callback_language, callback_page
 from service_auth import ServiceAuthMiddleware, agent_requests
+from wechat_api import router as wechat_router, wechat_service
 
 @asynccontextmanager
 async def lifespan(app):
@@ -71,8 +72,17 @@ async def lifespan(app):
     try:
         if runtime_allowed():
             finish()
+        if os.getenv("GUILIU_WECHAT_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
+            try:
+                wechat_service.start()
+            except Exception:
+                log.exception("WeChat reader could not start; continuing without WeChat integration")
         yield
     finally:
+        try:
+            wechat_service.stop()
+        except Exception:
+            log.exception("Could not stop WeChat reader")
         initialization.stop()
         full_mail_import.stop()
         try:
@@ -98,6 +108,7 @@ log = logging.getLogger("uvicorn.error.backend")
 DB_FILE = database_path()
 AGENT_BASE_URL = get_setting("services.agent_url", "http://127.0.0.1:8000", "ABK_AGENT_BASE_URL").rstrip("/")
 app.include_router(create_assets_router(lambda: DB_FILE))
+app.include_router(wechat_router)
 
 
 def local_initialization(request: Request):
